@@ -17,6 +17,7 @@ import { inputCounter } from "./editor/countInput";
 import { CustomStatusBar } from "./statusbar";
 import { BONBON_SETTINGS, type BonbonSettings } from "./settings";
 // import { VIEW_TYPE } from "./view";
+import { renderSubscription } from "./Subscription";
 
 export default class BonWorkflow extends Plugin {
 	private folderNames: FolderTaskItem[] = [];
@@ -36,7 +37,7 @@ export default class BonWorkflow extends Plugin {
 				const taskItems = await handleTaskChanges(
 					this.app,
 					file,
-					this.app.metadataCache.getFileCache(file) as CachedMetadata
+					this.app.metadataCache.getFileCache(file) as CachedMetadata,
 				);
 
 				if (taskItems) {
@@ -54,25 +55,25 @@ export default class BonWorkflow extends Plugin {
 					const taskItems = await handleTaskChanges(
 						this.app,
 						file,
-						cache
+						cache,
 					);
 					if (taskItems) {
 						this.folderNames = taskItems;
 						updateFileExplorerCheckboxes(
 							this.app,
-							this.folderNames
+							this.folderNames,
 						);
 					}
-				}
-			)
+				},
+			),
 		);
 
 		this.registerEvent(
-			this.app.workspace.on("file-menu", this.onFileMenu.bind(this))
+			this.app.workspace.on("file-menu", this.onFileMenu.bind(this)),
 		);
 
 		this.registerMarkdownPostProcessor((element, context) =>
-			handleCallouts(element, this, context)
+			handleCallouts(element, this, context),
 		);
 
 		this.registerEditorExtension(
@@ -89,6 +90,13 @@ export default class BonWorkflow extends Plugin {
 		);
 
 		// this.registerView(VIEW_TYPE, (leaf) => new TemplateManagerView(leaf));
+		// Register subscription codeblock processor
+		this.registerMarkdownCodeBlockProcessor(
+			"subscription",
+			(source, el, ctx) => {
+				renderSubscription(source, el, ctx);
+			}
+		);
 	}
 
 	onunload() {}
@@ -108,14 +116,14 @@ export default class BonWorkflow extends Plugin {
 		menu: Menu,
 		file: TAbstractFile,
 		source: string,
-		leaf?: WorkspaceLeaf
+		leaf?: WorkspaceLeaf,
 	) {
 		menu.addItem((item) => {
 			item.setIcon("search")
 				.setTitle(
 					file instanceof TFolder
 						? "Search in selected folder"
-						: "Search in selected file"
+						: "Search in selected file",
 				)
 				.onClick(() => {
 					const leaf =
@@ -138,7 +146,7 @@ export default class BonWorkflow extends Plugin {
 						},
 						{
 							history: false,
-						}
+						},
 					);
 				});
 		});
