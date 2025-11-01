@@ -1,4 +1,4 @@
-import { TypeDropdownComponent } from "./dropdown";
+import { TypeDropdownComponent } from "./typeDropdown";
 
 import {
 	App,
