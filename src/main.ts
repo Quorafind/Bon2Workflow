@@ -86,30 +86,32 @@ export default class BonWorkflow extends Plugin {
 		);
 
 		// Always register the editor extension, but check settings in onChange
-		// this.registerEditorExtension(
-		// 	inputCounter({
-		// 		countChars: true,
-		// 		countPunctuation: true,
-		// 		onChange: (counts) => {
-		// 			if (this.settings.enableCount && this.statusBar) {
-		// 				this.statusBar.update(counts);
-		// 			}
-		// 		},
-		// 		getCounts: () => {
-		// 			return (
-		// 				this.statusBar?.getCounts() ?? {
-		// 					characters: 0,
-		// 					punctuation: 0,
-		// 					pasteCount: 0,
-		// 					dropCount: 0,
-		// 					compositionLength: 0,
-		// 					compositionStartPos: 0,
-		// 					compositionEndPos: 0,
-		// 				}
-		// 			);
-		// 		},
-		// 	})
-		// );
+		if (this.settings.enableCount) {
+			this.registerEditorExtension(
+				inputCounter({
+					countChars: true,
+					countPunctuation: true,
+					onChange: (counts) => {
+						if (this.settings.enableCount && this.statusBar) {
+							this.statusBar.update(counts);
+						}
+					},
+					getCounts: () => {
+						return (
+							this.statusBar?.getCounts() ?? {
+								characters: 0,
+								punctuation: 0,
+								pasteCount: 0,
+								dropCount: 0,
+								compositionLength: 0,
+								compositionStartPos: 0,
+								compositionEndPos: 0,
+							}
+						);
+					},
+				})
+			);
+		}
 
 		// this.registerView(VIEW_TYPE, (leaf) => new TemplateManagerView(leaf));
 		// Register subscription codeblock processor
