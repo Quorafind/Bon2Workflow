@@ -1,6 +1,6 @@
 {
 	"id": "bonbon",
-	"name": "Bonbon",
+	"name": "Bon^2",
 	"version": "0.0.9",
 	"minAppVersion": "0.15.0",
 	"description": "A workflow plugin for Obsidian, based on Boninall's workflow.",
