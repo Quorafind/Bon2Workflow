@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type BonWorkflow from "./main";
+import { renderTypstSettings } from "./typst/typstSettingTab";
 
 export class BonWorkflowSettingTab extends PluginSettingTab {
 	plugin: BonWorkflow;
@@ -34,6 +35,7 @@ export class BonWorkflowSettingTab extends PluginSettingTab {
 						}
 					})
 			);
+
+		renderTypstSettings(containerEl, this.plugin);
 	}
 }
-

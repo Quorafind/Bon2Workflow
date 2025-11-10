@@ -19,16 +19,23 @@ import { BONBON_SETTINGS, type BonbonSettings } from "./settings";
 // import { VIEW_TYPE } from "./view";
 import { renderSubscription } from "./Subscription";
 import { BonWorkflowSettingTab } from "./settingTab";
+import { TypstScriptManager } from "./typst/typstScriptManager";
+import { TypstConverter } from "./typst/typstConverter";
+import { DEFAULT_TYPST_SETTINGS } from "./typst/typstSettings";
 
 export default class BonWorkflow extends Plugin {
 	private folderNames: FolderTaskItem[] = [];
 	private statusBar: CustomStatusBar | null = null;
 	private statusBarEl: HTMLElement | null = null;
+	private typstConverter: TypstConverter | null = null;
+	private typstScriptManager: TypstScriptManager | null = null;
 
 	public settings: BonbonSettings;
 
 	async onload() {
 		await this.loadSettings();
+		this.registerExtensions(["typ"], "markdown");
+		await this.initializeTypstFeatures();
 
 		// Add settings tab
 		this.addSettingTab(new BonWorkflowSettingTab(this.app, this));
@@ -73,6 +80,30 @@ export default class BonWorkflow extends Plugin {
 							this.folderNames
 						);
 					}
+
+					if (this.typstConverter) {
+						try {
+							const shouldConvert =
+								this.typstConverter.shouldConvert(
+									file,
+									cache
+								);
+							if (shouldConvert) {
+								await this.typstConverter.convertFile(
+									file,
+									cache,
+									{
+										silent: true,
+									}
+								);
+							}
+						} catch (error) {
+							console.error(
+								"Typst auto conversion failed",
+								error
+							);
+						}
+					}
 				}
 			)
 		);
@@ -80,6 +111,58 @@ export default class BonWorkflow extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on("file-menu", this.onFileMenu.bind(this))
 		);
+
+		this.addCommand({
+			id: "convert-to-typst",
+			name: "Convert current note to Typst",
+			checkCallback: (checking) => {
+				if (!this.typstConverter) {
+					return false;
+				}
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension.toLowerCase() !== "md") {
+					return false;
+				}
+				if (checking) {
+					return true;
+				}
+				this.typstConverter
+					.convertFile(
+						file,
+						this.app.metadataCache.getFileCache(file),
+						{
+							silent: false,
+						}
+					)
+					.catch((error) =>
+						console.error("Typst conversion failed", error)
+					);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "recompile-typst",
+			name: "Recompile current Typst file",
+			checkCallback: (checking) => {
+				if (!this.typstConverter) {
+					return false;
+				}
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension.toLowerCase() !== "typ") {
+					return false;
+				}
+				if (checking) {
+					return true;
+				}
+				this.typstConverter
+					.compileTypstFile(file.path, false)
+					.catch((error) =>
+						console.error("Typst compile failed", error)
+					);
+				return true;
+			},
+		});
 
 		this.registerMarkdownPostProcessor((element, context) =>
 			handleCallouts(element, this, context)
@@ -131,6 +214,11 @@ export default class BonWorkflow extends Plugin {
 
 	loadStatusBar() {
 		if (!this.statusBar) {
+			// 确保清理已存在的状态栏元素，防止重复创建
+			if (this.statusBarEl) {
+				this.statusBarEl.remove();
+				this.statusBarEl = null;
+			}
 			this.statusBarEl = this.addStatusBarItem();
 			this.statusBar = new CustomStatusBar(
 				this.statusBarEl,
@@ -221,12 +309,53 @@ export default class BonWorkflow extends Plugin {
 	// 	workspace.revealLeaf(leaf);
 	// }
 
+	private async initializeTypstFeatures(): Promise<void> {
+		this.typstConverter = null;
+		this.typstScriptManager = null;
+
+		if (!this.settings.typst) {
+			return;
+		}
+
+		try {
+			this.typstScriptManager = new TypstScriptManager(
+				this.app.vault,
+				this.settings.typst.scriptDirectory
+			);
+			await this.typstScriptManager.ensureScriptDirectory();
+			await this.typstScriptManager.initializeDefaultScript();
+
+			this.typstConverter = new TypstConverter(
+				this.app,
+				this.settings.typst,
+				this.typstScriptManager
+			);
+		} catch (error) {
+			console.error("Failed to initialize Typst features", error);
+			this.typstConverter = null;
+			this.typstScriptManager = null;
+		}
+	}
+
+	public async refreshTypstFeatures(): Promise<void> {
+		await this.initializeTypstFeatures();
+	}
+
+	public getTypstScriptManager(): TypstScriptManager | null {
+		return this.typstScriptManager;
+	}
+
 	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			BONBON_SETTINGS,
-			await this.loadData()
-		);
+		const data = await this.loadData();
+		this.settings = Object.assign({}, BONBON_SETTINGS, data);
+		this.settings.historyChars = {
+			...(BONBON_SETTINGS.historyChars ?? {}),
+			...(data?.historyChars ?? {}),
+		};
+		this.settings.typst = {
+			...DEFAULT_TYPST_SETTINGS,
+			...(this.settings.typst ?? {}),
+		};
 	}
 
 	async saveSettings() {
