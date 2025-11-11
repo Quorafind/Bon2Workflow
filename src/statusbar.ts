@@ -1,5 +1,5 @@
 import { Component, debounce, Menu, setIcon } from "obsidian";
-import type { BonbonSettings } from "./settings";
+import type { bon2workflowSettings } from "./settings";
 import type BonWorkflow from "./main";
 
 export class CustomStatusBar extends Component {
@@ -41,8 +41,8 @@ export class CustomStatusBar extends Component {
 	}
 
 	onload() {
-		this.containerEl.toggleClass("bonbon-status-bar", true);
-		this.containerEl.createSpan("bonbon-status-bar-item", (el) => {
+		this.containerEl.toggleClass("bon2workflow-status-bar", true);
+		this.containerEl.createSpan("bon2workflow-status-bar-item", (el) => {
 			setIcon(el, "square");
 		});
 
@@ -64,9 +64,12 @@ export class CustomStatusBar extends Component {
 			title: `Total characters: ${totalChars}`,
 		});
 
-		this.containerEl.createSpan("bonbon-status-bar-separator", (el) => {
-			el.textContent = " | ";
-		});
+		this.containerEl.createSpan(
+			"bon2workflow-status-bar-separator",
+			(el) => {
+				el.textContent = " | ";
+			}
+		);
 
 		this.dailyCountEl = this.containerEl.createEl("span", {
 			text: `Today: ${this.plugin.settings.historyChars[today]}`,

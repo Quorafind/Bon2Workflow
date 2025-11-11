@@ -160,12 +160,12 @@ table.subscription-tracker-table {
 	}
 }
 
-.bonbon-status-bar {
+.bon2workflow-status-bar {
 	display: flex;
 	gap: var(--size-2-2);
 }
 
-.bonbon-status-bar-item.is-active > svg {
+.bon2workflow-status-bar-item.is-active > svg {
 	fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l), 0.5);
 	transition: fill 0.2s ease-in-out;
 }

@@ -1,7 +1,7 @@
 import type { TypstSettings } from "./typst/typstSettings";
 import { DEFAULT_TYPST_SETTINGS } from "./typst/typstSettings";
 
-export interface BonbonSettings {
+export interface bon2workflowSettings {
 	historyChars: {
 		[key: string]: number;
 	};
@@ -15,7 +15,7 @@ export interface foderCheckSettings {
 	targetPath: string;
 }
 
-export const BONBON_SETTINGS: BonbonSettings = {
+export const bon2workflow_SETTINGS: bon2workflowSettings = {
 	historyChars: {},
 	enableCount: true,
 	typst: DEFAULT_TYPST_SETTINGS,

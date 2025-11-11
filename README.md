@@ -6,9 +6,9 @@ A plugin for Obsidian, based on Boninall's workflow.
 
 Over time, I have had many small ideas for improving Obsidian. Sometimes these ideas are too small to warrant publishing as standalone plugins, but I still frequently need these minor improvements.
 
-So, I decided to integrate these small improvements into one plugin, and that's what Bonbon is.
+So, I decided to integrate these small improvements into one plugin, and that's what Bon^2 Workflow is.
 
-In my imagination, Bonbon will have a lot of candy-level small features.
+In my imagination, Bon^2 Workflow will have a lot of candy-level small features. (Sometimes not small features)
 
 ## File Explorer
 

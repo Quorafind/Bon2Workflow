@@ -18,7 +18,7 @@ import {
 } from "./utils";
 import { inputCounter } from "./editor/countInput";
 import { CustomStatusBar } from "./statusbar";
-import { BONBON_SETTINGS, type BonbonSettings } from "./settings";
+import { bon2workflow_SETTINGS, type bon2workflowSettings } from "./settings";
 // import { VIEW_TYPE } from "./view";
 import { renderSubscription } from "./Subscription";
 import { BonWorkflowSettingTab } from "./settingTab";
@@ -43,7 +43,7 @@ export default class BonWorkflow extends Plugin {
 	private typstAPI: TypstAPI | null = null;
 	private typstWasmRenderer: any = null; // TypstWasmRenderer instance
 
-	public settings: BonbonSettings;
+	public settings: bon2workflowSettings;
 
 	async onload() {
 		await this.loadSettings();
@@ -480,9 +480,9 @@ export default class BonWorkflow extends Plugin {
 
 	async loadSettings() {
 		const data = await this.loadData();
-		this.settings = Object.assign({}, BONBON_SETTINGS, data);
+		this.settings = Object.assign({}, bon2workflow_SETTINGS, data);
 		this.settings.historyChars = {
-			...(BONBON_SETTINGS.historyChars ?? {}),
+			...(bon2workflow_SETTINGS.historyChars ?? {}),
 			...(data?.historyChars ?? {}),
 		};
 		this.settings.typst = {
