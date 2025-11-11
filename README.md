@@ -1,6 +1,6 @@
-# Bon^2 Workflow
+# Bon^2 (Bonbon) Workflow
 
-A plugin for Obsidian, based on Boninall's workflow.
+A plugin for Obsidian, based on [Boninall's workflow](workflow.md).
 
 [中文文档](README_CN.md)
 
