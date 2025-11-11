@@ -6,18 +6,47 @@ import {
 	Setting,
 	TextAreaComponent,
 	TextComponent,
-	ButtonComponent,
 } from "obsidian";
 import type BonWorkflow from "../main";
 import { DEFAULT_SCRIPT_CONTENT } from "./typstScriptManager";
 import type { TypstScriptManager } from "./typstScriptManager";
-import type { TypstSettings, TypstTransformMode } from "./typstSettings";
+import type {
+	TypstSettings,
+	TypstTransformMode,
+	TypstPreviewMode,
+	TypstCompileFormat,
+} from "./typstSettings";
 import { BonWorkflowSettingTab } from "../settingTab";
 import {
 	downloadAndCacheWasm,
 	loadLocalWasmFile,
 	WasmStorageInfo,
 } from "./typstWasmStorage";
+
+/**
+ * Check if Typst CLI is installed and get version
+ */
+async function detectTypstCLI(): Promise<{
+	installed: boolean;
+	version?: string;
+	error?: string;
+}> {
+	try {
+		// Use require to import Node.js modules in Obsidian environment
+		const { exec } = require("child_process");
+		const { promisify } = require("util");
+		const execAsync = promisify(exec);
+
+		const { stdout } = await execAsync("typst --version");
+		const version = stdout.trim();
+		return { installed: true, version };
+	} catch (error) {
+		return {
+			installed: false,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
 
 interface ScriptEditorModalOptions {
 	mode: "create" | "edit";
@@ -44,7 +73,7 @@ class ScriptEditorModal extends Modal {
 		let nameInput: TextComponent | null = null;
 		if (this.options.mode === "create") {
 			new Setting(contentEl)
-				.setName("Script Name")
+				.setName("Script name")
 				.setDesc("Enter the name only, no .js suffix required")
 				.addText((text) => {
 					nameInput = text;
@@ -143,7 +172,12 @@ export function renderTypstSettings(
 
 	const section = containerEl.createDiv({ cls: "typst-settings" });
 
-	new Setting(section).setHeading().setName("Typst workflow settings");
+	new Setting(section)
+		.setHeading()
+		.setName("Typst toolbox settings")
+		.setDesc(
+			"I always use Typst to export pdf for work, but I found I want to use markdown to write and export to pdf."
+		);
 
 	new Setting(section).setName("Enable Typst").addToggle((toggle) =>
 		toggle.setValue(typstSettings.enabled).onChange(async (value) => {
@@ -173,7 +207,7 @@ export function renderTypstSettings(
 	}
 
 	new Setting(section)
-		.setName("Trigger Tags")
+		.setName("Trigger tags")
 		.setDesc(
 			"Typst conversion is triggered if any of these tags are present in frontmatter"
 		)
@@ -195,9 +229,9 @@ export function renderTypstSettings(
 		});
 
 	new Setting(section)
-		.setName("Auto Compile Typst")
+		.setName("Auto compile Typst")
 		.setDesc(
-			"Automatically run `typst compile` after conversion (Typst CLI required)"
+			"Automatically convert and compile Typst when file changes are detected. If disabled, no automatic conversion will occur (use commands to manually convert)."
 		)
 		.addToggle((toggle) =>
 			toggle
@@ -209,7 +243,7 @@ export function renderTypstSettings(
 		);
 
 	new Setting(section)
-		.setName("Transform Engine")
+		.setName("Transform engine")
 		.setDesc(
 			"Choose built-in AST transform or continue using custom scripts"
 		)
@@ -226,7 +260,7 @@ export function renderTypstSettings(
 				});
 		});
 	new Setting(section)
-		.setName("Max Embed Depth")
+		.setName("Max embed depth")
 		.setDesc(
 			"Limit the recursion depth of ![[file]] embeds to avoid cyclic references"
 		)
@@ -242,9 +276,9 @@ export function renderTypstSettings(
 		});
 
 	// 代码块渲染设置
-	new Setting(section).setHeading().setName("Code Block Rendering");
+	new Setting(section).setHeading().setName("Code block rendering");
 	new Setting(section)
-		.setName("Enable Typst Code Block Rendering")
+		.setName("Enable Typst code block rendering")
 		.setDesc(
 			"Render typst code blocks as SVG in reading mode (uses WASM, no CLI required)"
 		)
@@ -262,11 +296,76 @@ export function renderTypstSettings(
 				})
 		);
 
+	// CLI 状态检测
+	new Setting(section).setHeading().setName("Typst CLI");
+	const cliStatusSetting = new Setting(section)
+		.setName("CLI status")
+		.setDesc("Checking Typst CLI installation...");
+
+	// 异步检测 CLI 状态
+	void (async () => {
+		const cliInfo = await detectTypstCLI();
+		if (cliInfo.installed) {
+			cliStatusSetting.setDesc(
+				`✅ Typst CLI detected: ${cliInfo.version || "unknown version"}`
+			);
+		} else {
+			cliStatusSetting.setDesc(
+				"⚠️ Typst CLI not found. To use CLI compilation features, please install Typst CLI from https://github.com/typst/typst/releases"
+			);
+		}
+	})();
+
+	// 预览模式设置
+	new Setting(section)
+		.setName("File-level preview mode")
+		.setDesc(
+			"For Markdown files with trigger tags. WASM: Fast (no packages). Compile: Full support (requires Typst CLI)."
+		)
+		.addDropdown((dropdown) => {
+			dropdown.addOption("compile", "Compile with CLI (Recommended)");
+			dropdown.addOption("wasm", "WASM Preview (No Packages)");
+			dropdown.addOption("none", "No Preview");
+			dropdown
+				.setValue(typstSettings.previewMode ?? "compile")
+				.onChange(async (value) => {
+					typstSettings.previewMode = value as TypstPreviewMode;
+					await plugin.saveSettings();
+					new Notice(`Preview mode set to: ${value}`);
+				});
+		});
+
+	// CLI 编译输出格式
+	new Setting(section)
+		.setName("CLI compile format")
+		.setDesc(
+			"Output format when using CLI compilation. SVG: Vector (best for preview). PNG: Raster image. PDF: Document."
+		)
+		.addDropdown((dropdown) => {
+			dropdown.addOption("svg", "SVG (Vector)");
+			dropdown.addOption("png", "PNG (Image)");
+			dropdown.addOption("pdf", "PDF (Document)");
+			dropdown
+				.setValue(typstSettings.compileFormat ?? "svg")
+				.onChange(async (value) => {
+					typstSettings.compileFormat = value as TypstCompileFormat;
+					await plugin.saveSettings();
+					new Notice(`Compile format set to: ${value}`);
+				});
+		});
+
+	// 外部包支持说明
+	new Setting(section)
+		.setName("External Typst packages")
+		.setDesc(
+			"⚠️ WASM rendering does not support external packages (@preview/...). To use external packages, switch Preview Mode to 'Compile with CLI' and install Typst CLI."
+		);
+
 	// WASM 管理设置
 	renderWasmManagementSettings(section, plugin);
 
 	new Setting(section)
-		.setName("Code Block Cache Size")
+		.setName("Code block cache size")
 		.setDesc(
 			"Number of compiled SVG results to cache (larger = more memory)"
 		)
@@ -283,7 +382,7 @@ export function renderTypstSettings(
 
 	let pendingDirectory = typstSettings.scriptDirectory;
 	new Setting(section)
-		.setName("Script Directory")
+		.setName("Script directory")
 		.setDesc("Vault-relative path for storing Typst transform scripts")
 		.addText((text) => {
 			text.setPlaceholder("typst-scripts")
@@ -308,9 +407,9 @@ export function renderTypstSettings(
 			});
 		});
 
-	new Setting(section).setHeading().setName("Script Management");
+	new Setting(section).setHeading().setName("Script management");
 	const scriptSetting = new Setting(section)
-		.setName("Script List")
+		.setName("Script list")
 		.setDesc("Manage Typst transform scripts");
 
 	let dropdown: DropdownComponent | null = null;
@@ -432,14 +531,14 @@ function renderWasmManagementSettings(
 	containerEl: HTMLElement,
 	plugin: BonWorkflow
 ) {
-	new Setting(containerEl).setHeading().setName("WASM Module Management");
+	new Setting(containerEl).setHeading().setName("WASM module management");
 
 	const wasmRenderer = plugin.getTypstWasmRenderer();
 	const storage = wasmRenderer?.getStorage();
 
 	if (!storage) {
 		new Setting(containerEl)
-			.setName("WASM Status")
+			.setName("WASM status")
 			.setDesc(
 				"WASM renderer not initialized. Enable code block rendering first."
 			);
@@ -448,7 +547,7 @@ function renderWasmManagementSettings(
 
 	// WASM 状态显示
 	const statusSetting = new Setting(containerEl)
-		.setName("WASM Status")
+		.setName("WASM status")
 		.setDesc("Loading...");
 
 	// 更新状态显示
@@ -605,7 +704,7 @@ function renderWasmManagementSettings(
 
 	// 加载本地文件按钮
 	new Setting(containerEl)
-		.setName("Load from Local Files")
+		.setName("Load from local files")
 		.setDesc("Load WASM files from your computer")
 		.addButton((button) =>
 			button.setButtonText("Load Compiler").onClick(() => {
@@ -676,7 +775,7 @@ function renderWasmManagementSettings(
 
 	// 清除缓存按钮
 	new Setting(containerEl)
-		.setName("Clear WASM Cache")
+		.setName("Clear WASM cache")
 		.setDesc("Remove all cached WASM files from IndexedDB")
 		.addButton((button) =>
 			button

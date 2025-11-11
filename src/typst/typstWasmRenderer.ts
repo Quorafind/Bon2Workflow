@@ -1,7 +1,7 @@
 /**
- * Typst WASM 渲染器
- * 使用 typst.ts 库将 Typst 代码编译为 SVG
- * 使用 IndexedDB 缓存 WASM，避免打包体积过大
+ * Typst WASM Renderer
+ * Uses typst.ts library to compile Typst code into SVG
+ * Uses IndexedDB to cache WASM, avoiding large bundle size
  */
 
 import { TypstCache } from "./typstCache";
@@ -22,11 +22,11 @@ export class TypstWasmRenderer {
 	}
 
 	/**
-	 * 初始化 WASM 渲染器
-	 * 加载 typst.ts 模块
+	 * Initialize the WASM renderer.
+	 * Loads the typst.ts module.
 	 */
 	async initialize(): Promise<void> {
-		// 避免重复初始化
+		// Prevent duplicate initialization
 		if (this.initialized) {
 			return;
 		}
@@ -41,10 +41,10 @@ export class TypstWasmRenderer {
 
 	private async doInitialize(): Promise<void> {
 		try {
-			// 初始化 IndexedDB
+			// Initialize IndexedDB
 			await this.storage.initialize();
 
-			// 检查是否已缓存 WASM
+			// Check if WASM is cached
 			const hasCompiler = await this.storage.hasWasm("compiler");
 			const hasRenderer = await this.storage.hasWasm("renderer");
 
@@ -54,7 +54,7 @@ export class TypstWasmRenderer {
 				);
 			}
 
-			// 从 IndexedDB 加载 WASM
+			// Load WASM from IndexedDB
 			const compilerEntry = await this.storage.loadWasm("compiler");
 			const rendererEntry = await this.storage.loadWasm("renderer");
 
@@ -62,21 +62,23 @@ export class TypstWasmRenderer {
 				throw new Error("Failed to load WASM from cache");
 			}
 
-			// 使用浏览器专用的 all-in-one-lite 版本，避免 Node.js fs 模块依赖
+			// Use all-in-one-lite version
+			// Note: WASM version does not support external packages. Use CLI mode for external packages.
 			const module = await import(
 				"@myriaddreamin/typst.ts/dist/esm/contrib/all-in-one-lite.mjs"
 			);
 			typstModule = module;
 
-			// 重要：在 Obsidian/Electron 环境中，必须配置 WASM 加载方式
-			// 使用 Blob URL 加载 WASM（从 IndexedDB 缓存加载）
+			// Important: In Obsidian/Electron environment, configure WASM loading method
+			// Use Blob URL to load WASM from IndexedDB cache
 
 			if (typstModule.$typst) {
-				// 配置编译器 WASM
+				// Configure compiler WASM
 				typstModule.$typst.setCompilerInitOptions({
 					getModule: () => {
-						// 创建 Blob URL（从 IndexedDB 加载）
-						// 显式转换为 ArrayBuffer 以避免类型错误
+						// Create Blob URL (from IndexedDB)
+						// Explicitly convert to ArrayBuffer to avoid type errors
+						// @ts-ignore SharedArrayBuffer is not supported in browsers
 						const blob = new Blob([compilerEntry.data.buffer], {
 							type: "application/wasm",
 						});
@@ -84,17 +86,20 @@ export class TypstWasmRenderer {
 						console.log(
 							"Typst Compiler WASM loaded from IndexedDB:",
 							url,
-							`(v${compilerEntry.version}, ${(compilerEntry.size / 1024).toFixed(1)}KB)`
+							`(v${compilerEntry.version}, ${(
+								compilerEntry.size / 1024
+							).toFixed(1)}KB)`
 						);
 						return url;
 					},
 				});
 
-				// 配置渲染器 WASM
+				// Configure renderer WASM
 				typstModule.$typst.setRendererInitOptions({
 					getModule: () => {
-						// 创建 Blob URL
-						// 显式转换为 ArrayBuffer 以避免类型错误
+						// Create Blob URL
+						// Explicitly convert to ArrayBuffer to avoid type errors
+						// @ts-ignore SharedArrayBuffer is not supported in browsers
 						const blob = new Blob([rendererEntry.data.buffer], {
 							type: "application/wasm",
 						});
@@ -102,7 +107,9 @@ export class TypstWasmRenderer {
 						console.log(
 							"Typst Renderer WASM loaded from IndexedDB:",
 							url,
-							`(v${rendererEntry.version}, ${(rendererEntry.size / 1024).toFixed(1)}KB)`
+							`(v${rendererEntry.version}, ${(
+								rendererEntry.size / 1024
+							).toFixed(1)}KB)`
 						);
 						return url;
 					},
@@ -114,7 +121,7 @@ export class TypstWasmRenderer {
 		} catch (error) {
 			console.error("Failed to initialize Typst WASM renderer:", error);
 			throw new Error(
-				`Typst 渲染器初始化失败: ${
+				`Typst renderer initialization failed: ${
 					error instanceof Error ? error.message : String(error)
 				}`
 			);
@@ -122,47 +129,47 @@ export class TypstWasmRenderer {
 	}
 
 	/**
-	 * 将 Typst 代码渲染为 SVG（带缓存）
-	 * @param code Typst 源代码
-	 * @returns SVG 字符串
+	 * Render Typst code to SVG (with cache).
+	 * @param code Typst source code
+	 * @returns SVG string
 	 */
 	async renderToSVG(code: string): Promise<string> {
 		if (!this.initialized) {
 			await this.initialize();
 		}
 
-		// 检查缓存
+		// Check cache
 		const codeHash = await this.hashCode(code);
 		const cached = this.cache.get(codeHash);
 		if (cached) {
 			return cached;
 		}
 
-		// 编译
+		// Compile
 		const svg = await this.compile(code);
 
-		// 缓存结果
+		// Cache result
 		this.cache.set(codeHash, svg);
 
 		return svg;
 	}
 
 	/**
-	 * 编译 Typst 代码为 SVG（不使用缓存）
-	 * @param code Typst 源代码
-	 * @returns SVG 字符串
+	 * Compile Typst code to SVG (without cache).
+	 * @param code Typst source code
+	 * @returns SVG string
 	 */
 	private async compile(code: string): Promise<string> {
 		try {
-			// 使用 typst.ts 的 $typst.svg API
+			// Use typst.ts $typst.svg API
 			if (!typstModule || !typstModule.$typst) {
 				throw new Error("Typst module not loaded");
 			}
 
-			// 在代码前添加页面设置，让页面自动适应内容大小
-			// width: auto, height: auto 让页面大小自动适应内容
-			// margin: 0em 移除默认边距以获得更紧凑的输出
-			const wrappedCode = `#set page(width: auto, height: auto, margin: 0em)\n${code}`;
+			// Add page settings before code for auto size and compact output
+			// width: auto, height: auto for automatic sizing
+			// margin: 0em to remove default margins and make output tighter
+			const wrappedCode = `#set page(height: auto, margin: 2.07em)\n${code}`;
 
 			const svg = await typstModule.$typst.svg({
 				mainContent: wrappedCode,
@@ -176,7 +183,7 @@ export class TypstWasmRenderer {
 		} catch (error) {
 			console.error("Typst compilation error:", error);
 			throw new Error(
-				`Typst 编译失败: ${
+				`Typst Compile Error: ${
 					error instanceof Error ? error.message : String(error)
 				}`
 			);
@@ -184,12 +191,12 @@ export class TypstWasmRenderer {
 	}
 
 	/**
-	 * 计算代码的 SHA-256 哈希值
-	 * @param code 源代码
-	 * @returns 十六进制哈希字符串
+	 * Calculate SHA-256 hash of code.
+	 * @param code Source code
+	 * @returns Hexadecimal hash string
 	 */
 	private async hashCode(code: string): Promise<string> {
-		// 使用浏览器原生 crypto API
+		// Use browser native crypto API
 		const encoder = new TextEncoder();
 		const data = encoder.encode(code);
 		const hashBuffer = await crypto.subtle.digest("SHA-256", data);
@@ -201,14 +208,14 @@ export class TypstWasmRenderer {
 	}
 
 	/**
-	 * 清空缓存
+	 * Clear the cache.
 	 */
 	clearCache(): void {
 		this.cache.clear();
 	}
 
 	/**
-	 * 获取缓存统计信息
+	 * Get cache statistics info.
 	 */
 	getCacheStats(): { size: number } {
 		return {
@@ -217,7 +224,7 @@ export class TypstWasmRenderer {
 	}
 
 	/**
-	 * 获取 WASM 存储管理器
+	 * Get the WASM storage manager.
 	 */
 	getStorage(): TypstWasmStorage {
 		return this.storage;

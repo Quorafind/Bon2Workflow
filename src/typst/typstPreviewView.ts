@@ -1,24 +1,28 @@
 /**
- * Typst 预览视图
- * 实时显示 WASM 渲染的 SVG，并提供 PDF/PNG/SVG 导出功能
+ * Typst Preview View
+ * Real-time display of SVG rendered using WASM, with export options for PDF/PNG/SVG
  */
 
-import { ItemView, Notice, TFile, WorkspaceLeaf } from "obsidian";
+import {
+	ItemView,
+	Notice,
+	TFile,
+	WorkspaceLeaf,
+	FileSystemAdapter,
+} from "obsidian";
 import type { TypstWasmRenderer } from "./typstWasmRenderer";
 import type { TypstConverter } from "./typstConverter";
-
+import { exec } from "child_process";
 export const TYPST_PREVIEW_VIEW_TYPE = "typst-preview-view";
 
 export class TypstPreviewView extends ItemView {
 	private renderer: TypstWasmRenderer;
 	private converter: TypstConverter;
 	private sourceFile: TFile | null = null;
-	private currentTypstCode: string = "";
 	private currentSvg: string = "";
 
-	// UI 容器
+	// UI containers
 	private previewContainer: HTMLElement;
-	private toolbarContainer: HTMLElement;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -50,85 +54,53 @@ export class TypstPreviewView extends ItemView {
 		container.empty();
 		container.addClass("typst-preview-view");
 
-		// 创建工具栏
+		// Create toolbar
 		this.createToolbar(container);
 
-		// 创建预览容器
+		// Create preview container
 		this.createPreviewContainer(container);
 	}
 
 	async onClose() {
-		// 清理资源
+		// Cleanup resources
 		this.sourceFile = null;
-		this.currentTypstCode = "";
 		this.currentSvg = "";
 	}
 
 	/**
-	 * 创建工具栏（导出按钮）
+	 * Create toolbar (export buttons)
 	 */
 	private createToolbar(container: Element): void {
-		this.toolbarContainer = container.createDiv({
-			cls: "typst-preview-toolbar",
-		});
+		// SVG export button
+		this.addAction("image-file", "Export as SVG", () => this.exportAsSvg());
 
-		// SVG 导出按钮
-		this.createToolbarButton(
-			this.toolbarContainer,
-			"image-file",
-			"Export as SVG",
-			() => this.exportAsSvg()
+		// PDF export button
+		this.addAction("file-text", "Export as PDF (CLI)", () =>
+			this.exportAsPdf()
 		);
 
-		// PDF 导出按钮
-		this.createToolbarButton(
-			this.toolbarContainer,
-			"file-text",
-			"Export as PDF (CLI)",
-			() => this.exportAsPdf()
-		);
-
-		// PNG 导出按钮
-		this.createToolbarButton(
-			this.toolbarContainer,
-			"image",
-			"Export as PNG (CLI)",
-			() => this.exportAsPng()
+		// PNG export button
+		this.addAction("image", "Export as PNG (CLI)", () =>
+			this.exportAsPng()
 		);
 	}
 
 	/**
-	 * 创建工具栏按钮
-	 */
-	private createToolbarButton(
-		container: HTMLElement,
-		icon: string,
-		tooltip: string,
-		onClick: () => void
-	): void {
-		const button = container.createEl("button", {
-			cls: "typst-toolbar-button",
-			attr: { "aria-label": tooltip },
-		});
-
-		button.innerHTML = `<svg class="svg-icon"><use href="#lucide-${icon}"></use></svg>`;
-		button.addEventListener("click", onClick);
-	}
-
-	/**
-	 * 创建预览容器
+	 * Create preview container
 	 */
 	private createPreviewContainer(container: Element): void {
 		this.previewContainer = container.createDiv({
 			cls: "typst-preview-container",
 		});
 
-		// 初始提示
-		this.showPlaceholder("No preview available. Edit a Markdown file with 'bon-typst' tag.");
+		// Initial placeholder
+		this.showPlaceholder(
+			"No preview available. Edit a Markdown file with 'bon-typst' tag."
+		);
 	}
 
 	/**
-	 * 显示占位符消息
+	 * Show placeholder message
 	 */
 	private showPlaceholder(message: string): void {
 		this.previewContainer.empty();
@@ -139,45 +111,282 @@ export class TypstPreviewView extends ItemView {
 	}
 
 	/**
-	 * 更新预览内容（由 TypstConverter 调用）
-	 * @param file 源 Markdown 文件
-	 * @param typstCode Typst 代码
+	 * Update preview content (WASM mode)
+	 * @param file Source Markdown file
+	 * @param typstCode Typst code
 	 */
 	public async updatePreview(file: TFile, typstCode: string): Promise<void> {
 		this.sourceFile = file;
-		this.currentTypstCode = typstCode;
 
-		// 显示加载状态
+		// Show loading state
 		this.previewContainer.empty();
 		const loadingEl = this.previewContainer.createDiv({
 			cls: "typst-preview-loading",
-			text: "Rendering Typst...",
+			text: "Rendering Typst with WASM...",
 		});
 
 		try {
-			// 使用 WASM 渲染 SVG
+			// Render SVG using WASM
 			const svg = await this.renderer.renderToSVG(typstCode);
 			this.currentSvg = svg;
 
-			// 移除加载提示
+			// Remove loading indicator
 			loadingEl.remove();
 
-			// 渲染 SVG
+			// Render SVG
 			this.renderSvg(svg);
 
-			// 更新标题
+			// Update title
 			this.updateTitle();
 		} catch (error) {
-			// 移除加载提示
+			// Remove loading indicator
 			loadingEl.remove();
 
-			// 显示错误
+			// Show error
 			this.showError(error);
 		}
 	}
 
 	/**
-	 * 渲染 SVG 到容器
+	 * Update preview content (WASM mode, fallback to CLI if failed)
+	 * @param file Source Markdown file
+	 * @param typstCode Typst code
+	 * @param compileFormat CLI compilation format (used on fallback)
+	 */
+	public async updatePreviewWithFallback(
+		file: TFile,
+		typstCode: string,
+		compileFormat: "pdf" | "png" | "svg" = "svg"
+	): Promise<void> {
+		this.sourceFile = file;
+
+		// Show loading state
+		this.previewContainer.empty();
+		const loadingEl = this.previewContainer.createDiv({
+			cls: "typst-preview-loading",
+			text: "Rendering Typst with WASM...",
+		});
+
+		try {
+			// Try rendering SVG with WASM
+			const svg = await this.renderer.renderToSVG(typstCode);
+			this.currentSvg = svg;
+
+			// Remove loading indicator
+			loadingEl.remove();
+
+			// Render SVG
+			this.renderSvg(svg);
+
+			// Update title
+			this.updateTitle();
+		} catch (error) {
+			// Check if it's a package-related error
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			const isPackageError =
+				errorMessage.includes("package") ||
+				errorMessage.includes("Registry");
+
+			if (isPackageError) {
+				// Package error: automatically fallback to CLI
+				console.log(
+					"WASM rendering failed due to package dependency, falling back to CLI compilation"
+				);
+				loadingEl.textContent = `WASM failed (package dependency), compiling with CLI...`;
+
+				try {
+					// Compile using CLI
+					const typstPath = this.buildTypstPath(file);
+					const outputPath = await this.converter.compileTypstFile(
+						typstPath,
+						compileFormat,
+						true // silent
+					);
+
+					// Remove loading indicator
+					loadingEl.remove();
+
+					// Load compiled file
+					await this.loadCompiledFile(outputPath, compileFormat);
+
+					// Update title
+					this.updateTitle();
+
+					// Notify user about the fallback
+					new Notice(
+						"WASM rendering failed, used CLI compilation instead"
+					);
+				} catch (cliError) {
+					// CLI compilation also failed
+					loadingEl.remove();
+					this.showError(cliError);
+					new Notice(
+						`CLI compilation also failed: ${
+							cliError instanceof Error
+								? cliError.message
+								: String(cliError)
+						}`
+					);
+				}
+			} else {
+				// Other errors: show directly
+				loadingEl.remove();
+				this.showError(error);
+			}
+		}
+	}
+
+	/**
+	 * Update preview content from compiled file (CLI mode)
+	 * @param file Source Markdown file
+	 * @param outputPath Compiled output file path
+	 * @param format Output format
+	 */
+	public async updatePreviewFromFile(
+		file: TFile,
+		outputPath: string,
+		format: "pdf" | "png" | "svg"
+	): Promise<void> {
+		this.sourceFile = file;
+
+		// Show loading state
+		this.previewContainer.empty();
+		const loadingEl = this.previewContainer.createDiv({
+			cls: "typst-preview-loading",
+			text: `Loading ${format.toUpperCase()}...`,
+		});
+
+		try {
+			// Load file according to format
+			await this.loadCompiledFile(outputPath, format);
+
+			// Remove loading indicator
+			loadingEl.remove();
+
+			// Update title
+			this.updateTitle();
+		} catch (error) {
+			// Remove loading indicator
+			loadingEl.remove();
+
+			// Show error
+			this.showError(error);
+		}
+	}
+
+	/**
+	 * Load compiled file
+	 */
+	private async loadCompiledFile(
+		outputPath: string,
+		format: "pdf" | "png" | "svg"
+	): Promise<void> {
+		this.previewContainer.empty();
+
+		if (format === "png") {
+			// PNG: could be a folder (multi-page) or a single file
+			const abstractFile =
+				this.app.vault.getAbstractFileByPath(outputPath);
+
+			if (!abstractFile) {
+				throw new Error(`Output path not found: ${outputPath}`);
+			}
+
+			// Check if file or folder
+			if (abstractFile instanceof TFile) {
+				// Single PNG file
+				const resourcePath = this.app.vault.adapter.getResourcePath(
+					abstractFile.path
+				);
+				const img = this.previewContainer.createEl("img", {
+					cls: "typst-preview-image",
+				});
+				img.src = resourcePath;
+			} else {
+				// PNG folder: load all pages
+				const folder = this.app.vault.getAbstractFileByPath(outputPath);
+				if (!folder) {
+					throw new Error(
+						`PNG pages folder not found: ${outputPath}`
+					);
+				}
+
+				// Get all PNG files in the folder
+				const files = this.app.vault
+					.getFiles()
+					.filter(
+						(file) =>
+							file.path.startsWith(outputPath + "/") &&
+							file.extension === "png"
+					);
+
+				// Sort by number in filename (1.png, 2.png, 3.png, ...)
+				files.sort((a, b) => {
+					const numA = parseInt(a.basename, 10);
+					const numB = parseInt(b.basename, 10);
+					return numA - numB;
+				});
+
+				if (files.length === 0) {
+					throw new Error(
+						`No PNG pages found in folder: ${outputPath}`
+					);
+				}
+
+				// Create vertically stacked page container
+				const pagesContainer = this.previewContainer.createDiv({
+					cls: "typst-preview-pages",
+				});
+
+				// Create image element for each page
+				for (const file of files) {
+					const resourcePath = this.app.vault.adapter.getResourcePath(
+						file.path
+					);
+					const pageWrapper = pagesContainer.createDiv({
+						cls: "typst-preview-page-wrapper",
+					});
+
+					const pageNumber = pageWrapper.createDiv({
+						cls: "typst-preview-page-number",
+						text: `Page ${file.basename}`,
+					});
+
+					const img = pageWrapper.createEl("img", {
+						cls: "typst-preview-image",
+					});
+					img.src = resourcePath;
+				}
+			}
+		} else {
+			// SVG and PDF: should be a file
+			const file = this.app.vault.getAbstractFileByPath(outputPath);
+			console.log(outputPath);
+			if (!(file instanceof TFile)) {
+				throw new Error(`Output file not found: ${outputPath}`);
+			}
+
+			if (format === "svg") {
+				// SVG: read and render directly
+				const svgContent = await this.app.vault.read(file);
+				this.currentSvg = svgContent;
+				this.previewContainer.innerHTML = svgContent;
+			} else if (format === "pdf") {
+				// PDF: embed as iframe
+				const resourcePath = this.app.vault.adapter.getResourcePath(
+					file.path
+				);
+				const iframe = this.previewContainer.createEl("iframe", {
+					cls: "typst-preview-pdf",
+				});
+				iframe.src = resourcePath;
+			}
+		}
+	}
+
+	/**
+	 * Render SVG to container
 	 */
 	private renderSvg(svg: string): void {
 		this.previewContainer.empty();
@@ -185,7 +394,7 @@ export class TypstPreviewView extends ItemView {
 	}
 
 	/**
-	 * 显示错误信息
+	 * Show error message
 	 */
 	private showError(error: unknown): void {
 		this.previewContainer.empty();
@@ -207,15 +416,15 @@ export class TypstPreviewView extends ItemView {
 	}
 
 	/**
-	 * 更新视图标题
+	 * Update view title
 	 */
 	private updateTitle(): void {
-		// 触发 Obsidian 更新标题
-		this.leaf.updateHeader();
+		// @ts-expect-error - titleContainerEl is not typed
+		(this.titleContainerEl as any).setText(this.getDisplayText());
 	}
 
 	/**
-	 * 导出为 SVG
+	 * Export as SVG
 	 */
 	private async exportAsSvg(): Promise<void> {
 		if (!this.currentSvg || !this.sourceFile) {
@@ -235,7 +444,7 @@ export class TypstPreviewView extends ItemView {
 	}
 
 	/**
-	 * 导出为 PDF（使用 Typst CLI）
+	 * Export as PDF (using Typst CLI)
 	 */
 	private async exportAsPdf(): Promise<void> {
 		if (!this.sourceFile) {
@@ -247,7 +456,7 @@ export class TypstPreviewView extends ItemView {
 			const typstPath = this.buildTypstPath(this.sourceFile);
 			const pdfPath = this.buildExportPath(this.sourceFile, "pdf");
 
-			// 调用 Typst CLI 编译
+			// Compile with Typst CLI
 			await this.compileWithCli(typstPath, pdfPath, "pdf");
 
 			new Notice(`PDF exported: ${pdfPath}`);
@@ -259,7 +468,7 @@ export class TypstPreviewView extends ItemView {
 	}
 
 	/**
-	 * 导出为 PNG（使用 Typst CLI）
+	 * Export as PNG (using Typst CLI)
 	 */
 	private async exportAsPng(): Promise<void> {
 		if (!this.sourceFile) {
@@ -271,7 +480,7 @@ export class TypstPreviewView extends ItemView {
 			const typstPath = this.buildTypstPath(this.sourceFile);
 			const pngPath = this.buildExportPath(this.sourceFile, "png");
 
-			// 调用 Typst CLI 编译
+			// Compile with Typst CLI
 			await this.compileWithCli(typstPath, pngPath, "png");
 
 			new Notice(`PNG exported: ${pngPath}`);
@@ -283,27 +492,41 @@ export class TypstPreviewView extends ItemView {
 	}
 
 	/**
-	 * 使用 Typst CLI 编译文件
+	 * Compile file using Typst CLI
 	 */
 	private async compileWithCli(
 		typstPath: string,
 		outputPath: string,
 		format: "pdf" | "png"
 	): Promise<void> {
-		const { exec } = require("child_process");
-		const { FileSystemAdapter } = require("obsidian");
-
 		const adapter = this.app.vault.adapter;
 		if (!(adapter instanceof FileSystemAdapter)) {
 			throw new Error("File system adapter not available");
 		}
 
 		const fullTypstPath = adapter.getFullPath(typstPath);
-		const fullOutputPath = adapter.getFullPath(outputPath);
 		const vaultRoot = adapter.getFullPath("");
 
+		// PNG format uses folder to store multipage documents
+		let finalOutputPath = outputPath;
+		if (format === "png") {
+			// outputPath should already be folder path (from buildExportPath)
+			// Make sure the folder exists
+			const folderExists = await this.app.vault.adapter.exists(
+				outputPath
+			);
+			if (!folderExists) {
+				await this.app.vault.createFolder(outputPath);
+			}
+
+			// Construct output path: folder/{n}.png
+			finalOutputPath = `${outputPath}/{n}.png`;
+		}
+
+		const fullOutputPath = adapter.getFullPath(finalOutputPath);
+
 		await new Promise<void>((resolve, reject) => {
-			// 使用 --root 参数允许访问 vault 内所有文件
+			// Use --root to allow access to all vault files
 			const command = `typst compile --root "${vaultRoot}" "${fullTypstPath}" "${fullOutputPath}"`;
 
 			exec(command, (error: any, stdout: string, stderr: string) => {
@@ -318,7 +541,7 @@ export class TypstPreviewView extends ItemView {
 	}
 
 	/**
-	 * 构建 Typst 文件路径
+	 * Construct Typst file path
 	 */
 	private buildTypstPath(file: TFile): string {
 		const extensionPattern = new RegExp(`\\.${file.extension}$`, "i");
@@ -329,13 +552,21 @@ export class TypstPreviewView extends ItemView {
 	}
 
 	/**
-	 * 构建导出文件路径
+	 * Construct export file path
+	 * Returns folder path for PNG, file path for other formats
 	 */
 	private buildExportPath(file: TFile, extension: string): string {
 		const extensionPattern = new RegExp(`\\.${file.extension}$`, "i");
-		if (!extensionPattern.test(file.path)) {
-			return `${file.path}.${extension}`;
+		const basePath = extensionPattern.test(file.path)
+			? file.path.replace(extensionPattern, "")
+			: file.path;
+
+		if (extension === "png") {
+			// PNG: return folder path
+			return `${basePath}-pages`;
+		} else {
+			// Other formats: return file path
+			return `${basePath}.${extension}`;
 		}
-		return file.path.replace(extensionPattern, `.${extension}`);
 	}
 }

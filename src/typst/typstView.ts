@@ -1,5 +1,5 @@
 import { EditableFileView, TFile } from "obsidian";
-import { EditorView, GutterMarker } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 

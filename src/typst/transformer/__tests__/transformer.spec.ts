@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Vault } from "obsidian";
+import type { App, Vault } from "obsidian";
 import { markdownToTypst, type EmbedEnvironment } from "../../transformer";
 
 interface EmbedFixture {
@@ -25,6 +25,9 @@ function createEmbedEnvironment(
 
 	return {
 		vault,
+		app: {
+			vault: vault,
+		} as unknown as App,
 		currentFile: "Home.md",
 		resolveFilePath: async (link: string) => {
 			const normalized = link.trim();

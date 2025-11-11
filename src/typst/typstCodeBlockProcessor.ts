@@ -1,15 +1,15 @@
 /**
- * Typst 代码块处理器
- * 用于在 Markdown 阅读模式中渲染 typst 代码块
+ * Typst code block processor
+ * Renders Typst code blocks in Markdown reading mode
  */
 
 import type { MarkdownPostProcessorContext } from "obsidian";
 import type { TypstWasmRenderer } from "./typstWasmRenderer";
 
 /**
- * 创建 Typst 代码块处理器函数
- * @param renderer WASM 渲染器实例
- * @returns 代码块处理函数
+ * Create Typst code block processor function
+ * @param renderer WASM renderer instance
+ * @returns Code block processing function
  */
 export function createTypstCodeBlockProcessor(renderer: TypstWasmRenderer) {
 	return async (
@@ -17,56 +17,56 @@ export function createTypstCodeBlockProcessor(renderer: TypstWasmRenderer) {
 		el: HTMLElement,
 		ctx: MarkdownPostProcessorContext
 	) => {
-		// 清空容器
+		// Clear container
 		el.empty();
 
-		// 创建渲染容器
+		// Create render container
 		const container = el.createDiv({
 			cls: "typst-render-container",
 		});
 
-		// 显示加载状态
+		// Show loading status
 		const loadingEl = container.createDiv({
 			cls: "typst-loading",
-			text: "正在渲染 Typst...",
+			text: "Rendering Typst...",
 		});
 
 		try {
-			// 渲染 SVG
+			// Render SVG
 			const svg = await renderer.renderToSVG(source.trim());
 
-			// 移除加载提示
+			// Remove loading indicator
 			loadingEl.remove();
 
-			// 插入 SVG
+			// Insert SVG
 			container.innerHTML = svg;
 		} catch (error) {
-			// 移除加载提示
+			// Remove loading indicator
 			loadingEl.remove();
 
-			// 显示错误信息
+			// Show error message
 			renderError(container, error);
 		}
 	};
 }
 
 /**
- * 渲染错误信息
- * @param container 容器元素
- * @param error 错误对象
+ * Render error message
+ * @param container Container element
+ * @param error Error object
  */
 function renderError(container: HTMLElement, error: unknown): void {
 	const errorContainer = container.createDiv({
 		cls: "typst-error",
 	});
 
-	// 错误标题
+	// Error title
 	errorContainer.createDiv({
 		cls: "typst-error-title",
-		text: "⚠️ Typst 编译错误",
+		text: "⚠️ Typst Compile Error",
 	});
 
-	// 错误消息
+	// Error message
 	const message = error instanceof Error ? error.message : String(error);
 	errorContainer.createEl("pre", {
 		cls: "typst-error-message",

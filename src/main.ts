@@ -8,6 +8,7 @@ import {
 	type TFile,
 	type CachedMetadata,
 	debounce,
+	type MarkdownView,
 } from "obsidian";
 import {
 	type FolderTaskItem,
@@ -25,7 +26,13 @@ import { TypstScriptManager } from "./typst/typstScriptManager";
 import { TypstConverter } from "./typst/typstConverter";
 import { DEFAULT_TYPST_SETTINGS } from "./typst/typstSettings";
 import { TYPST_VIEW_TYPE, TypstView } from "./typst/typstView";
+import {
+	TYPST_PREVIEW_VIEW_TYPE,
+	TypstPreviewView,
+} from "./typst/typstPreviewView";
 import { TypstAPI } from "./typst/api";
+import { TypstWasmRenderer } from "./typst/typstWasmRenderer";
+import { createTypstCodeBlockProcessor } from "./typst/typstCodeBlockProcessor";
 
 export default class BonWorkflow extends Plugin {
 	private folderNames: FolderTaskItem[] = [];
@@ -44,7 +51,37 @@ export default class BonWorkflow extends Plugin {
 		if (this.settings.typst && this.settings.typst.enabled) {
 			this.registerView(TYPST_VIEW_TYPE, (leaf) => new TypstView(leaf));
 			this.registerExtensions(["typ"], TYPST_VIEW_TYPE);
+
+			// Register preview view (only when WASM rendering is enabled)
+			if (this.settings.typst.enableCodeBlock) {
+				await this.initializeTypstWasmRenderer();
+
+				// Register preview view
+				this.registerView(
+					TYPST_PREVIEW_VIEW_TYPE,
+					(leaf) =>
+						new TypstPreviewView(
+							leaf,
+							this.typstWasmRenderer,
+							this.typstConverter!
+						)
+				);
+			}
+
 			await this.initializeTypstFeatures();
+
+			this.registerEvent(
+				this.app.metadataCache.on(
+					"changed",
+					async (
+						file: TFile,
+						data: string,
+						cache: CachedMetadata
+					) => {
+						this.triggerDebounce(file, data, cache);
+					}
+				)
+			);
 		}
 
 		// Add settings tab
@@ -55,7 +92,12 @@ export default class BonWorkflow extends Plugin {
 		}
 
 		this.app.workspace.onLayoutReady(async () => {
-			const file = this.app.vault.getFileByPath("TODO.md");
+			if (!this.settings.folderCheck.enabled) {
+				return;
+			}
+			const file = this.app.vault.getFileByPath(
+				this.settings.folderCheck.targetPath
+			);
 			if (!file) {
 				return;
 			}
@@ -74,70 +116,10 @@ export default class BonWorkflow extends Plugin {
 		});
 
 		// Monitor for task changes
-		this.registerEvent(
-			this.app.metadataCache.on(
-				"changed",
-				async (file: TFile, data: string, cache: CachedMetadata) => {
-					this.triggerDebounce(file, data, cache);
-				}
-			)
-		);
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", this.onFileMenu.bind(this))
 		);
-
-		this.addCommand({
-			id: "convert-to-typst",
-			name: "Convert current note to Typst",
-			checkCallback: (checking) => {
-				if (!this.typstConverter) {
-					return false;
-				}
-				const file = this.app.workspace.getActiveFile();
-				if (!file || file.extension.toLowerCase() !== "md") {
-					return false;
-				}
-				if (checking) {
-					return true;
-				}
-				this.typstConverter
-					.convertFile(
-						file,
-						this.app.metadataCache.getFileCache(file),
-						{
-							silent: false,
-						}
-					)
-					.catch((error) =>
-						console.error("Typst conversion failed", error)
-					);
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "recompile-typst",
-			name: "Recompile current Typst file",
-			checkCallback: (checking) => {
-				if (!this.typstConverter) {
-					return false;
-				}
-				const file = this.app.workspace.getActiveFile();
-				if (!file || file.extension.toLowerCase() !== "typ") {
-					return false;
-				}
-				if (checking) {
-					return true;
-				}
-				this.typstConverter
-					.compileTypstFile(file.path, false)
-					.catch((error) =>
-						console.error("Typst compile failed", error)
-					);
-				return true;
-			},
-		});
 
 		this.registerMarkdownPostProcessor((element, context) =>
 			handleCallouts(element, this, context)
@@ -179,26 +161,21 @@ export default class BonWorkflow extends Plugin {
 				renderSubscription(source, el, ctx);
 			}
 		);
-
-		// Register typst codeblock processor
-		if (this.settings.typst?.enableCodeBlock) {
-			await this.initializeTypstWasmRenderer();
-		}
 	}
 
 	onunload() {
-		// 清理状态栏
+		// Clean up status bar
 		if (this.statusBar) {
 			this.unloadStatusBar();
 		}
 
-		// 清理全局 Typst API，防止内存泄漏和全局作用域污染
+		// Clean up global Typst API to prevent memory leaks and global scope pollution
 		this.unloadTypstFeatures();
 	}
 
 	loadStatusBar() {
 		if (!this.statusBar) {
-			// 确保清理已存在的状态栏元素，防止重复创建
+			// Ensure to remove existing status bar element to prevent duplicate creation
 			if (this.statusBarEl) {
 				this.statusBarEl.remove();
 				this.statusBarEl = null;
@@ -211,7 +188,7 @@ export default class BonWorkflow extends Plugin {
 				},
 				this
 			);
-			// addChild() 会自动调用子组件的 onload()，无需手动调用
+			// addChild() will automatically call the child's onload(), no need to invoke manually
 			this.addChild(this.statusBar);
 		}
 	}
@@ -316,15 +293,35 @@ export default class BonWorkflow extends Plugin {
 				this.typstScriptManager
 			);
 
-			// 初始化 API 并注册到全局作用域
+			// Set preview update callback (according to preview mode)
+			const previewMode = this.settings.typst.previewMode;
+			if (previewMode !== "none") {
+				this.typstConverter.setPreviewUpdateCallback(
+					async (file, typstCode) => {
+						await this.updateTypstPreview(
+							file,
+							typstCode,
+							previewMode
+						);
+					}
+				);
+			} else {
+				// Remove callback to avoid invalid preview updates
+				this.typstConverter.setPreviewUpdateCallback(null);
+			}
+
+			// Initialize API and register to global context
 			this.typstAPI = new TypstAPI(
 				this.typstConverter,
 				this.typstScriptManager,
 				this.app
 			);
 
-			// 注册全局 API
+			// Register global API
 			this.registerGlobalTypstAPI();
+
+			// Register Typst commands
+			this.registerTypstCommands();
 		} catch (error) {
 			console.error("Failed to initialize Typst features", error);
 			this.typstConverter = null;
@@ -338,8 +335,8 @@ export default class BonWorkflow extends Plugin {
 	}
 
 	/**
-	 * 卸载 Typst 功能并清理全局 API
-	 * 防止内存泄漏和全局作用域污染
+	 * Unload Typst features and clean up global API
+	 * Prevent memory leaks and global scope pollution
 	 */
 	public unloadTypstFeatures(): void {
 		this.unregisterGlobalTypstAPI();
@@ -351,27 +348,19 @@ export default class BonWorkflow extends Plugin {
 	}
 
 	/**
-	 * 初始化 Typst WASM 渲染器并注册代码块处理器
+	 * Initialize Typst WASM renderer and register code block processor
 	 */
 	private async initializeTypstWasmRenderer(): Promise<void> {
 		try {
-			// 动态导入模块
-			const { TypstWasmRenderer } = await import(
-				"./typst/typstWasmRenderer"
-			);
-			const { createTypstCodeBlockProcessor } = await import(
-				"./typst/typstCodeBlockProcessor"
-			);
-
-			// 创建渲染器实例
+			// Create renderer instance
 			this.typstWasmRenderer = new TypstWasmRenderer(
 				this.settings.typst?.codeBlockCacheSize ?? 100
 			);
 
-			// 初始化 WASM
+			// Initialize WASM
 			await this.typstWasmRenderer.initialize();
 
-			// 注册代码块处理器
+			// Register code block processor
 			this.registerMarkdownCodeBlockProcessor(
 				"typst",
 				createTypstCodeBlockProcessor(this.typstWasmRenderer)
@@ -379,12 +368,9 @@ export default class BonWorkflow extends Plugin {
 
 			console.log("Typst WASM renderer initialized and registered");
 		} catch (error) {
-			console.error(
-				"Failed to initialize Typst WASM renderer:",
-				error
-			);
+			console.error("Failed to initialize Typst WASM renderer:", error);
 			new Notice(
-				`Typst 代码块渲染初始化失败: ${
+				`Typst code block rendering initialization failed: ${
 					error instanceof Error ? error.message : String(error)
 				}`
 			);
@@ -392,7 +378,7 @@ export default class BonWorkflow extends Plugin {
 	}
 
 	/**
-	 * 注册全局 Typst API 到 window.bon.typst
+	 * Register global Typst API to window.bon.typst
 	 */
 	private registerGlobalTypstAPI(): void {
 		if (!this.typstAPI) {
@@ -403,12 +389,12 @@ export default class BonWorkflow extends Plugin {
 		}
 
 		try {
-			// 确保 window.bon 命名空间存在
+			// Ensure window.bon namespace exists
 			if (typeof window.bon === "undefined") {
 				window.bon = {};
 			}
 
-			// 注册 API 方法，使用 .bind() 确保 this 上下文正确
+			// Register API methods, use .bind() to ensure correct this context
 			window.bon.typst = {
 				convert: this.typstAPI.convert.bind(this.typstAPI),
 				convertAsync: this.typstAPI.convertAsync.bind(this.typstAPI),
@@ -427,22 +413,17 @@ export default class BonWorkflow extends Plugin {
 	}
 
 	/**
-	 * 清理全局 Typst API
+	 * Clean up the global Typst API
 	 */
 	private unregisterGlobalTypstAPI(): void {
 		try {
 			if (window.bon?.typst) {
 				delete window.bon.typst;
-				console.log(
-					"[Bon-Workflow] Global Typst API unregistered"
-				);
+				console.log("[Bon-Workflow] Global Typst API unregistered");
 			}
 
-			// 如果 window.bon 为空对象，也删除它
-			if (
-				window.bon &&
-				Object.keys(window.bon).length === 0
-			) {
+			// If window.bon is an empty object, also delete it
+			if (window.bon && Object.keys(window.bon).length === 0) {
 				delete window.bon;
 			}
 		} catch (error) {
@@ -469,13 +450,22 @@ export default class BonWorkflow extends Plugin {
 				updateFileExplorerCheckboxes(this.app, this.folderNames);
 			}
 
-			if (this.typstConverter) {
+			// Only trigger conversion if auto-compile is enabled
+			if (
+				this.typstConverter &&
+				this.settings.typst &&
+				this.settings.typst.autoCompile
+			) {
 				try {
 					const shouldConvert = this.typstConverter.shouldConvert(
 						file,
 						cache
 					);
-					if (shouldConvert) {
+
+					// Determine whether to convert depending on preview mode
+					const previewMode =
+						this.settings.typst.previewMode ?? "wasm";
+					if (shouldConvert && previewMode !== "none") {
 						await this.typstConverter.convertFile(file, cache, {
 							silent: true,
 						});
@@ -503,5 +493,170 @@ export default class BonWorkflow extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	/**
+	 * Open or activate Typst preview view
+	 */
+	private async activateTypstPreviewView(): Promise<void> {
+		const { workspace } = this.app;
+
+		// Check if preview view is already open
+		let leaf = workspace.getLeavesOfType(TYPST_PREVIEW_VIEW_TYPE)[0];
+
+		if (!leaf) {
+			// Create a new right sidebar panel
+			leaf = workspace.getLeaf("split", "vertical");
+			if (leaf) {
+				await leaf.setViewState({
+					type: TYPST_PREVIEW_VIEW_TYPE,
+					active: true,
+				});
+			}
+		}
+
+		// Activate the view
+		if (leaf) {
+			workspace.revealLeaf(leaf);
+		}
+	}
+
+	/**
+	 * Update Typst preview view
+	 */
+	private async updateTypstPreview(
+		file: TFile,
+		typstCode: string,
+		mode: "wasm" | "compile"
+	): Promise<void> {
+		const { workspace } = this.app;
+
+		// Find preview views
+		const leaves = workspace.getLeavesOfType(TYPST_PREVIEW_VIEW_TYPE);
+
+		if (leaves.length > 0) {
+			for (const leaf of leaves) {
+				const view = leaf.view;
+				if (view instanceof TypstPreviewView) {
+					if (mode === "wasm") {
+						// WASM mode: Render Typst code, fallback to CLI on failure
+						const format =
+							this.settings.typst?.compileFormat ?? "svg";
+						await view.updatePreviewWithFallback(
+							file,
+							typstCode,
+							format
+						);
+					} else if (mode === "compile" && this.typstConverter) {
+						// CLI mode: Compile file and load result
+						try {
+							const typstPath = this.buildTypstPath(file);
+							const format =
+								this.settings.typst?.compileFormat ?? "svg";
+							const outputPath =
+								await this.typstConverter.compileTypstFile(
+									typstPath,
+									format,
+									true // silent
+								);
+							await view.updatePreviewFromFile(
+								file,
+								outputPath,
+								format
+							);
+						} catch (error) {
+							console.error("CLI compile failed:", error);
+							new Notice(
+								`Typst CLI compilation failed: ${
+									error instanceof Error
+										? error.message
+										: String(error)
+								}`
+							);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Build Typst file path
+	 */
+	private buildTypstPath(file: TFile): string {
+		const extensionPattern = new RegExp(`\\.${file.extension}$`, "i");
+		if (!extensionPattern.test(file.path)) {
+			return `${file.path}.typ`;
+		}
+		return file.path.replace(extensionPattern, ".typ");
+	}
+
+	/**
+	 * Register Typst-related commands (only called when Typst features are enabled)
+	 */
+	private registerTypstCommands(): void {
+		const checkConvertToTypst = (
+			checking: boolean,
+			format: "pdf" | "png" | "svg"
+		) => {
+			if (!this.typstConverter) {
+				return false;
+			}
+			const file = this.app.workspace.getActiveFile();
+			if (!file || file.extension.toLowerCase() !== "md") {
+				return false;
+			}
+			if (checking) {
+				return true;
+			}
+			this.typstConverter
+				.convertFile(file, this.app.metadataCache.getFileCache(file), {
+					silent: false,
+					format,
+				})
+				.catch((error) =>
+					console.error("Typst conversion failed", error)
+				);
+			return true;
+		};
+
+		this.addCommand({
+			id: "convert-to-typst-pdf",
+			name: "Convert current note to Typst and compile to PDF",
+			checkCallback: (checking) => {
+				return checkConvertToTypst(checking, "pdf");
+			},
+		});
+
+		this.addCommand({
+			id: "convert-to-typst-png",
+			name: "Convert current note to Typst and compile to PNG",
+			checkCallback: (checking) => {
+				return checkConvertToTypst(checking, "png");
+			},
+		});
+
+		this.addCommand({
+			id: "convert-to-typst-svg",
+			name: "Convert current note to Typst and compile to SVG",
+			checkCallback: (checking) => {
+				return checkConvertToTypst(checking, "svg");
+			},
+		});
+
+		this.addCommand({
+			id: "open-typst-preview",
+			name: "Open Typst preview",
+			checkCallback: (checking) => {
+				if (!this.settings.typst?.enableCodeBlock) {
+					return false;
+				}
+				if (checking) {
+					return true;
+				}
+				this.activateTypstPreviewView();
+				return true;
+			},
+		});
 	}
 }

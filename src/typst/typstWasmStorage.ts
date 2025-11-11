@@ -1,6 +1,6 @@
 /**
  * Typst WASM Storage Manager
- * 使用 IndexedDB 缓存 WASM 字节码，避免重复下载和打包体积过大
+ * Use IndexedDB to cache WASM binaries to avoid repeated downloads and reduce bundle size.
  */
 
 const DB_NAME = "typst-wasm-cache";
@@ -19,13 +19,13 @@ export interface WasmEntry extends WasmStorageInfo {
 }
 
 /**
- * IndexedDB 管理器，用于缓存 WASM 文件
+ * IndexedDB manager for caching WASM files.
  */
 export class TypstWasmStorage {
 	private db: IDBDatabase | null = null;
 
 	/**
-	 * 初始化数据库连接
+	 * Initialize the database connection.
 	 */
 	async initialize(): Promise<void> {
 		return new Promise((resolve, reject) => {
@@ -55,7 +55,7 @@ export class TypstWasmStorage {
 	}
 
 	/**
-	 * 保存 WASM 文件到 IndexedDB
+	 * Save a WASM file to IndexedDB.
 	 */
 	async saveWasm(entry: WasmEntry): Promise<void> {
 		if (!this.db) {
@@ -74,11 +74,9 @@ export class TypstWasmStorage {
 	}
 
 	/**
-	 * 从 IndexedDB 加载 WASM 文件
+	 * Load a WASM file from IndexedDB.
 	 */
-	async loadWasm(
-		name: "compiler" | "renderer"
-	): Promise<WasmEntry | null> {
+	async loadWasm(name: "compiler" | "renderer"): Promise<WasmEntry | null> {
 		if (!this.db) {
 			await this.initialize();
 		}
@@ -98,7 +96,7 @@ export class TypstWasmStorage {
 	}
 
 	/**
-	 * 检查 WASM 是否已缓存
+	 * Check if the WASM file is cached.
 	 */
 	async hasWasm(name: "compiler" | "renderer"): Promise<boolean> {
 		const entry = await this.loadWasm(name);
@@ -106,7 +104,7 @@ export class TypstWasmStorage {
 	}
 
 	/**
-	 * 获取缓存的 WASM 信息（不包含 data）
+	 * Get cached WASM info (without data).
 	 */
 	async getWasmInfo(
 		name: "compiler" | "renderer"
@@ -125,7 +123,7 @@ export class TypstWasmStorage {
 	}
 
 	/**
-	 * 删除指定的 WASM 文件
+	 * Delete a specified WASM file.
 	 */
 	async deleteWasm(name: "compiler" | "renderer"): Promise<void> {
 		if (!this.db) {
@@ -144,7 +142,7 @@ export class TypstWasmStorage {
 	}
 
 	/**
-	 * 清空所有缓存的 WASM 文件
+	 * Clear all cached WASM files.
 	 */
 	async clearAll(): Promise<void> {
 		if (!this.db) {
@@ -163,7 +161,7 @@ export class TypstWasmStorage {
 	}
 
 	/**
-	 * 获取所有缓存的 WASM 信息
+	 * Get information for all cached WASM files.
 	 */
 	async listAll(): Promise<WasmStorageInfo[]> {
 		if (!this.db) {
@@ -191,7 +189,7 @@ export class TypstWasmStorage {
 	}
 
 	/**
-	 * 关闭数据库连接
+	 * Close the database connection.
 	 */
 	close(): void {
 		if (this.db) {
@@ -202,7 +200,7 @@ export class TypstWasmStorage {
 }
 
 /**
- * 从 URL 下载 WASM 文件并保存到 IndexedDB
+ * Download WASM file from URL and save to IndexedDB.
  */
 export async function downloadAndCacheWasm(
 	url: string,
@@ -242,7 +240,7 @@ export async function downloadAndCacheWasm(
 		}
 	}
 
-	// 合并所有 chunks
+	// Merge all chunks
 	const data = new Uint8Array(receivedLength);
 	let position = 0;
 	for (const chunk of chunks) {
@@ -250,7 +248,7 @@ export async function downloadAndCacheWasm(
 		position += chunk.length;
 	}
 
-	// 保存到 IndexedDB
+	// Save to IndexedDB
 	await storage.saveWasm({
 		name,
 		version,
@@ -261,7 +259,7 @@ export async function downloadAndCacheWasm(
 }
 
 /**
- * 从本地文件加载 WASM 并保存到 IndexedDB
+ * Load WASM from a local file and save to IndexedDB.
  */
 export async function loadLocalWasmFile(
 	file: File,

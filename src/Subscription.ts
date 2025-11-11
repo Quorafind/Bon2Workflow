@@ -19,7 +19,7 @@ interface SubscriptionStatus {
 
 export class SubscriptionTracker {
 	private subscriptions: Subscription[] = [];
-	private exchangeRate: number = 7.5; // 固定汇率
+	private exchangeRate: number = 7.5; // Fixed exchange rate
 
 	parseSubscriptions(rawData: string): void {
 		const lines = rawData.trim().split("\n");
@@ -63,7 +63,9 @@ export class SubscriptionTracker {
 			);
 			return {
 				type: "lifetime",
-				daysInfo: `${sub.startDate.toLocaleDateString("zh-CN")} 开始`,
+				daysInfo: `${sub.startDate.toLocaleDateString(
+					"en-US"
+				)} Started`,
 				daysSinceStart,
 			};
 		}
@@ -75,8 +77,8 @@ export class SubscriptionTracker {
 
 		return {
 			type: "active",
-			daysInfo: `${sub.startDate.toLocaleDateString("zh-CN")} 开始 · ${
-				sub.isYearly ? "年付" : "月付"
+			daysInfo: `${sub.startDate.toLocaleDateString("en-US")} Started · ${
+				sub.isYearly ? "Yearly" : "Monthly"
 			}`,
 			daysSinceStart,
 		};
@@ -106,9 +108,9 @@ export class SubscriptionTracker {
 				now
 			);
 
-			// 计算总花费
+			// Calculate total expenditure
 			if (sub.isLifetime) {
-				// 终身订阅只算一次
+				// Lifetime subscriptions only count once
 				if (sub.currency === "CNY") {
 					totalCNY += sub.amount;
 					totalUSD += sub.amount / this.exchangeRate;
@@ -117,7 +119,7 @@ export class SubscriptionTracker {
 					totalCNY += sub.amount * this.exchangeRate;
 				}
 			} else {
-				// 计算总共花费的月数或年数
+				// Calculate total spent by months or years
 				let totalAmount = 0;
 				if (sub.isYearly) {
 					const yearsSinceStart = Math.floor(monthsSinceStart / 12);
@@ -135,7 +137,7 @@ export class SubscriptionTracker {
 				}
 			}
 
-			// 计算当月花费（只计算非终身的订阅）
+			// Calculate spent this month (only for non-lifetime subscriptions)
 			if (!sub.isLifetime) {
 				const now = new Date();
 				const currentYear = now.getFullYear();
@@ -146,17 +148,17 @@ export class SubscriptionTracker {
 				const subStartMonth = sub.startDate.getMonth();
 				const subStartDay = sub.startDate.getDate();
 
-				// 计算订阅周期的结束日期
+				// Calculate the end date of subscription period
 				let periodEndDate: Date;
 				if (sub.isYearly) {
-					// 年付：从开始日期到明年同一天
+					// Yearly: from start date to same day next year
 					periodEndDate = new Date(
 						subStartYear + 1,
 						subStartMonth,
 						subStartDay
 					);
 				} else {
-					// 月付：从开始日期到下个月同一天
+					// Monthly: from start date to same day next month
 					periodEndDate = new Date(
 						subStartYear,
 						subStartMonth + 1,
@@ -164,25 +166,25 @@ export class SubscriptionTracker {
 					);
 				}
 
-				// 计算订阅周期的总天数
+				// Calculate total days in the period
 				const periodTotalDays = Math.ceil(
 					(periodEndDate.getTime() - sub.startDate.getTime()) /
 						(1000 * 60 * 60 * 24)
 				);
 
-				// 计算本月的开始和结束日期
+				// Calculate this month's start and end date
 				const monthStart = new Date(currentYear, currentMonth, 1);
 				const monthEnd = new Date(currentYear, currentMonth + 1, 0);
 
-				// 计算本月已使用的天数（到当前日期）
+				// Days used in current month (up to today)
 				let daysInCurrentMonth = 0;
 				const overlapStart = new Date(
 					Math.max(sub.startDate.getTime(), monthStart.getTime())
 				);
 				const overlapEnd = new Date(
 					Math.min(
-						periodEndDate.getTime() - 1, // 减去1天，因为结束日期不包含在内
-						Math.min(monthEnd.getTime(), now.getTime()) // 不超过当前日期
+						periodEndDate.getTime() - 1, // Exclude end day
+						Math.min(monthEnd.getTime(), now.getTime())
 					)
 				);
 
@@ -191,19 +193,16 @@ export class SubscriptionTracker {
 						Math.ceil(
 							(overlapEnd.getTime() - overlapStart.getTime()) /
 								(1000 * 60 * 60 * 24)
-						) + 1; // +1 因为需要包含开始和结束日期
+						) + 1; // +1 to include both start and end dates
 				}
 
-				// 计算本月预计使用的天数（整个月）
+				// Days expected to be used in current month (full month)
 				let daysExpectedInCurrentMonth = 0;
 				const expectedOverlapStart = new Date(
 					Math.max(sub.startDate.getTime(), monthStart.getTime())
 				);
 				const expectedOverlapEnd = new Date(
-					Math.min(
-						periodEndDate.getTime() - 1,
-						monthEnd.getTime() // 使用整个月的结束日期
-					)
+					Math.min(periodEndDate.getTime() - 1, monthEnd.getTime())
 				);
 
 				if (expectedOverlapEnd >= expectedOverlapStart) {
@@ -212,10 +211,10 @@ export class SubscriptionTracker {
 							(expectedOverlapEnd.getTime() -
 								expectedOverlapStart.getTime()) /
 								(1000 * 60 * 60 * 24)
-						) + 1; // +1 因为需要包含开始和结束日期
+						) + 1; // +1 to include both start and end dates
 				}
 
-				// 按天数比例计算金额
+				// Prorate by number of days
 				if (daysInCurrentMonth > 0 && periodTotalDays > 0) {
 					const ratio = daysInCurrentMonth / periodTotalDays;
 					const monthlyAmount = sub.amount * ratio;
@@ -229,7 +228,7 @@ export class SubscriptionTracker {
 					}
 				}
 
-				// 计算本月预计花费
+				// Calculate expected spending for this month
 				if (daysExpectedInCurrentMonth > 0 && periodTotalDays > 0) {
 					const expectedRatio =
 						daysExpectedInCurrentMonth / periodTotalDays;
@@ -265,7 +264,7 @@ export class SubscriptionTracker {
 	}
 
 	render(containerEl: HTMLElement): void {
-		// 创建容器
+		// Create container
 		const wrapper = containerEl.createDiv({
 			cls: "subscription-tracker-container",
 		});
@@ -278,19 +277,19 @@ export class SubscriptionTracker {
 			cls: "subscription-tracker-table",
 		});
 
-		// 创建表头
+		// Create table header
 		const thead = table.createEl("thead", {
 			cls: "subscription-tracker-thead",
 		});
 		const headerRow = thead.createEl("tr");
-		["服务名称", "费用", "订阅状态"].forEach((text) => {
+		["Service Name", "Amount", "Subscription Status"].forEach((text) => {
 			const th = headerRow.createEl("th", {
 				cls: "subscription-tracker-th",
 				text: text,
 			});
 		});
 
-		// 创建表体
+		// Create table body
 		const tbody = table.createEl("tbody", {
 			cls: "subscription-tracker-tbody",
 		});
@@ -300,14 +299,14 @@ export class SubscriptionTracker {
 			const td = row.createEl("td", {
 				cls: "subscription-tracker-td subscription-tracker-loading",
 				attr: { colspan: "3" },
-				text: "正在加载数据...",
+				text: "Loading data...",
 			});
 		} else {
 			this.subscriptions.forEach((sub) => {
 				const status = this.getSubscriptionStatus(sub);
 				const row = tbody.createEl("tr");
 
-				// 服务名称
+				// Service Name
 				const nameCell = row.createEl("td", {
 					cls: "subscription-tracker-td",
 				});
@@ -318,7 +317,7 @@ export class SubscriptionTracker {
 					text: sub.name,
 				});
 
-				// 费用
+				// Amount
 				const priceCell = row.createEl("td", {
 					cls: "subscription-tracker-td",
 				});
@@ -329,7 +328,7 @@ export class SubscriptionTracker {
 					}${sub.amount.toFixed(2)}`,
 				});
 
-				// 只有美元才显示换算后的人民币
+				// Only show RMB conversion for USD
 				if (sub.currency === "USD") {
 					priceCell.createDiv({
 						cls: "subscription-tracker-price-converted",
@@ -339,7 +338,7 @@ export class SubscriptionTracker {
 					});
 				}
 
-				// 订阅状态
+				// Subscription Status
 				const statusCell = row.createEl("td", {
 					cls: "subscription-tracker-td",
 				});
@@ -347,10 +346,10 @@ export class SubscriptionTracker {
 					cls: `subscription-tracker-subscription-type subscription-tracker-${status.type}`,
 					text:
 						status.type === "lifetime"
-							? "终身"
+							? "Lifetime"
 							: status.type === "active"
-							? "活跃"
-							: "已过期",
+							? "Active"
+							: "Expired",
 				});
 
 				statusCell.createDiv({
@@ -360,7 +359,7 @@ export class SubscriptionTracker {
 			});
 		}
 
-		// 创建表尾
+		// Create table footer
 		const footer = tableContainer.createDiv({
 			cls: "subscription-tracker-table-footer",
 		});
@@ -368,7 +367,7 @@ export class SubscriptionTracker {
 		const { totalCNY, totalUSD, monthlySpentCNY, monthlyExpectedCNY } =
 			this.calculateTotals();
 
-		// 计算当前月的天数
+		// Calculate days in current month
 		const now = new Date();
 		const currentYear = now.getFullYear();
 		const currentMonth = now.getMonth();
@@ -378,7 +377,7 @@ export class SubscriptionTracker {
 			0
 		).getDate();
 
-		// 计算日预计消费
+		// Calculate daily expected spending
 		const dailyExpectedCNY =
 			daysInCurrentMonth > 0
 				? monthlyExpectedCNY / daysInCurrentMonth
@@ -387,7 +386,7 @@ export class SubscriptionTracker {
 		const footerLeft = footer.createDiv({
 			cls: "subscription-tracker-footer-left",
 		});
-		footerLeft.createSpan({ text: "总计" });
+		footerLeft.createSpan({ text: "Total" });
 		footerLeft.createSpan({
 			cls: "subscription-tracker-footer-amount",
 			text: `¥${totalCNY.toFixed(2)}`,
@@ -396,7 +395,7 @@ export class SubscriptionTracker {
 		const footerRight = footer.createDiv({
 			cls: "subscription-tracker-footer-right",
 		});
-		footerRight.createSpan({ text: "本月花费" });
+		footerRight.createSpan({ text: "Spent This Month" });
 		footerRight.createSpan({
 			cls: "subscription-tracker-footer-amount",
 			text: `¥${monthlySpentCNY.toFixed(2)}`,
@@ -405,7 +404,7 @@ export class SubscriptionTracker {
 			cls: "subscription-tracker-footer-separator",
 			text: "|",
 		});
-		footerRight.createSpan({ text: "本月预计" });
+		footerRight.createSpan({ text: "Expected This Month" });
 		footerRight.createSpan({
 			cls: "subscription-tracker-footer-amount",
 			text: `¥${monthlyExpectedCNY.toFixed(2)}`,
@@ -414,7 +413,7 @@ export class SubscriptionTracker {
 			cls: "subscription-tracker-footer-separator",
 			text: "|",
 		});
-		footerRight.createSpan({ text: "日预计" });
+		footerRight.createSpan({ text: "Expected Daily" });
 		footerRight.createSpan({
 			cls: "subscription-tracker-footer-amount",
 			text: `¥${dailyExpectedCNY.toFixed(2)}`,

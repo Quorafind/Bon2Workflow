@@ -1,67 +1,67 @@
 import type { TFile } from "obsidian";
 
 /**
- * Typst 转换配置选项
+ * Typst conversion configuration options
  */
 export interface ConvertOptions {
 	/**
-	 * 转换引擎模式
-	 * - `ast`: 使用内置 AST 转换器（推荐，支持完整的 Obsidian 语法）
-	 * - `script`: 使用自定义 JavaScript 脚本
+	 * Transformation engine mode
+	 * - `ast`: Use built-in AST transformer (recommended, supports full Obsidian syntax)
+	 * - `script`: Use custom JavaScript script
 	 * @default "ast"
 	 */
 	transformMode?: "ast" | "script";
 
 	/**
-	 * 自定义脚本名称（仅在 transformMode 为 "script" 时有效）
+	 * Custom script name (only valid when transformMode is "script")
 	 * @example "default", "academic", "resume"
 	 */
 	scriptName?: string;
 
 	/**
-	 * 嵌入内容的最大递归深度（用于处理 ![[嵌入文件]]）
+	 * Maximum recursion depth for embeds (for handling ![[embedded file]])
 	 * @default 5
 	 */
 	maxEmbedDepth?: number;
 
 	/**
-	 * 静默模式（不显示通知）
+	 * Silent mode (no notifications)
 	 * @default false
 	 */
 	silent?: boolean;
 
 	/**
-	 * 转换后是否自动编译 Typst 文件为 PDF（需要本地安装 typst CLI）
+	 * Automatically compile the Typst file to PDF after conversion (requires Typst CLI installed locally)
 	 * @default false
 	 */
 	autoCompile?: boolean;
 }
 
 /**
- * Typst 全局 API 接口定义
+ * Typst global API interface definition
  */
 export interface TypstAPIInterface {
 	/**
-	 * 将 Markdown 字符串转换为 Typst 格式（同步）
+	 * Synchronously convert a Markdown string to Typst format
 	 *
-	 * @param markdown - 要转换的 Markdown 内容
-	 * @param options - 转换配置选项
-	 * @returns 转换后的 Typst 字符串
-	 * @throws 如果转换失败或配置无效
+	 * @param markdown - The Markdown content to convert
+	 * @param options - Conversion options
+	 * @returns The converted Typst string
+	 * @throws If conversion fails or options are invalid
 	 *
 	 * @example
 	 * ```typescript
-	 * // 基础用法
+	 * // Basic usage
 	 * const typst = window.bon.typst.convert("# Hello\n\nThis is **bold**.");
 	 * console.log(typst); // "= Hello\n\nThis is *bold*."
 	 *
-	 * // 使用 AST 模式（推荐）
+	 * // Use AST mode (recommended)
 	 * const typst = window.bon.typst.convert(
 	 *   "# Title\n\n[[link]] and ==highlight==",
 	 *   { transformMode: 'ast' }
 	 * );
 	 *
-	 * // 使用自定义脚本
+	 * // Use custom script
 	 * const typst = window.bon.typst.convert(
 	 *   "# Title",
 	 *   { transformMode: 'script', scriptName: 'academic' }
@@ -71,19 +71,19 @@ export interface TypstAPIInterface {
 	convert(markdown: string, options?: ConvertOptions): string;
 
 	/**
-	 * 异步转换 Markdown 内容或文件（支持文件和字符串输入）
+	 * Asynchronously convert Markdown content or file (supports file and string input)
 	 *
-	 * @param input - Markdown 字符串或 Obsidian TFile 对象
-	 * @param options - 转换配置选项
-	 * @returns Promise，解析为转换后的 Typst 字符串
-	 * @throws 如果转换失败、文件读取失败或配置无效
+	 * @param input - Markdown string or Obsidian TFile object
+	 * @param options - Conversion options
+	 * @returns Promise, resolves to the converted Typst string
+	 * @throws If conversion fails, file reading fails, or options are invalid
 	 *
 	 * @example
 	 * ```typescript
-	 * // 转换字符串
+	 * // Convert string
 	 * const typst = await window.bon.typst.convertAsync("# Hello");
 	 *
-	 * // 转换文件
+	 * // Convert file
 	 * const file = app.workspace.getActiveFile();
 	 * if (file) {
 	 *   const typst = await window.bon.typst.convertAsync(file, {
@@ -92,7 +92,7 @@ export interface TypstAPIInterface {
 	 *   });
 	 * }
 	 *
-	 * // 在 DataviewJS 中使用
+	 * // Use in DataviewJS
 	 * const files = dv.pages("#report").file;
 	 * for (const file of files) {
 	 *   const typst = await window.bon.typst.convertAsync(file);
@@ -106,16 +106,16 @@ export interface TypstAPIInterface {
 	): Promise<string>;
 
 	/**
-	 * 获取所有可用的 Typst 转换脚本列表
+	 * Get a list of all available Typst conversion scripts
 	 *
-	 * @returns Promise，解析为脚本名称数组
+	 * @returns Promise resolving to array of script names
 	 *
 	 * @example
 	 * ```typescript
 	 * const scripts = await window.bon.typst.listScripts();
 	 * console.log(scripts); // ["default", "academic", "resume"]
 	 *
-	 * // 使用返回的脚本名称
+	 * // Use the returned script names
 	 * const typst = window.bon.typst.convert(markdown, {
 	 *   transformMode: 'script',
 	 *   scriptName: scripts[0]

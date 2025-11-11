@@ -1,6 +1,6 @@
 /**
- * LRU 缓存管理器，用于缓存 Typst 编译结果
- * 使用代码内容的哈希值作为键
+ * LRU Cache Manager for caching Typst compilation results.
+ * Uses the hash of the code content as the key.
  */
 
 interface CacheEntry {
@@ -19,9 +19,9 @@ export class TypstCache {
 	}
 
 	/**
-	 * 获取缓存的 SVG 内容
-	 * @param codeHash 代码的哈希值
-	 * @returns SVG 字符串，如果不存在则返回 null
+	 * Get cached SVG content by code hash.
+	 * @param codeHash Hash of the code content
+	 * @returns SVG string if exists, otherwise null
 	 */
 	get(codeHash: string): string | null {
 		const entry = this.cache.get(codeHash);
@@ -29,28 +29,28 @@ export class TypstCache {
 			return null;
 		}
 
-		// 更新访问顺序（LRU）
+		// Update access order (LRU)
 		this.updateAccessOrder(codeHash);
 		return entry.svg;
 	}
 
 	/**
-	 * 设置缓存条目
-	 * @param codeHash 代码的哈希值
-	 * @param svg SVG 内容
+	 * Set a cache entry.
+	 * @param codeHash Hash of the code content
+	 * @param svg SVG content
 	 */
 	set(codeHash: string, svg: string): void {
-		// 如果已存在，先删除旧的访问记录
+		// If already exists, remove its old access record first
 		if (this.cache.has(codeHash)) {
 			this.removeFromAccessOrder(codeHash);
 		}
 
-		// 如果缓存已满，删除最久未使用的条目
+		// If the cache is full, evict the least recently used item
 		if (this.cache.size >= this.maxSize) {
 			this.evictOldest();
 		}
 
-		// 添加新条目
+		// Add new entry
 		this.cache.set(codeHash, {
 			svg,
 			timestamp: Date.now(),
@@ -59,7 +59,7 @@ export class TypstCache {
 	}
 
 	/**
-	 * 清空所有缓存
+	 * Clear all cache entries.
 	 */
 	clear(): void {
 		this.cache.clear();
@@ -67,14 +67,14 @@ export class TypstCache {
 	}
 
 	/**
-	 * 获取当前缓存大小
+	 * Get current cache size.
 	 */
 	size(): number {
 		return this.cache.size;
 	}
 
 	/**
-	 * 更新访问顺序
+	 * Update access order.
 	 */
 	private updateAccessOrder(codeHash: string): void {
 		this.removeFromAccessOrder(codeHash);
@@ -82,7 +82,7 @@ export class TypstCache {
 	}
 
 	/**
-	 * 从访问顺序列表中移除
+	 * Remove an entry from the access order list.
 	 */
 	private removeFromAccessOrder(codeHash: string): void {
 		const index = this.accessOrder.indexOf(codeHash);
@@ -92,7 +92,7 @@ export class TypstCache {
 	}
 
 	/**
-	 * 删除最久未使用的条目
+	 * Evict the least recently used entry.
 	 */
 	private evictOldest(): void {
 		if (this.accessOrder.length === 0) {

@@ -1,4 +1,6 @@
 export type TypstTransformMode = "ast" | "script";
+export type TypstPreviewMode = "compile" | "wasm" | "none";
+export type TypstCompileFormat = "pdf" | "png" | "svg";
 
 export interface TypstSettings {
 	enabled: boolean;
@@ -8,9 +10,13 @@ export interface TypstSettings {
 	templateMapping: Record<string, string>;
 	transformMode: TypstTransformMode;
 	maxEmbedDepth: number;
-	// 代码块渲染设置
+	// Code block rendering settings
 	enableCodeBlock: boolean;
 	codeBlockCacheSize: number;
+	// Preview mode settings (per file)
+	previewMode: TypstPreviewMode;
+	// CLI compilation output format
+	compileFormat: TypstCompileFormat;
 }
 
 export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
@@ -23,4 +29,6 @@ export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
 	maxEmbedDepth: 5,
 	enableCodeBlock: true,
 	codeBlockCacheSize: 100,
+	previewMode: "compile", // Default to CLI per file
+	compileFormat: "svg", // Default output is SVG (can be displayed in preview view)
 };

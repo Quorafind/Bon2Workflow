@@ -4,8 +4,8 @@ import type { TypstConverter } from "./typstConverter";
 import type { TypstScriptManager } from "./typstScriptManager";
 
 /**
- * Typst 转换 API 封装层
- * 提供标准化的公共 API 接口，用于在全局作用域中暴露 Typst 转换能力
+ * Typst conversion API wrapper.
+ * Provides a standardized public API interface to expose Typst conversion capabilities globally.
  */
 export class TypstAPI implements TypstAPIInterface {
 	constructor(
@@ -15,27 +15,27 @@ export class TypstAPI implements TypstAPIInterface {
 	) {}
 
 	/**
-	 * 将 Markdown 字符串转换为 Typst 格式（同步）
+	 * Convert a Markdown string to Typst format (synchronous)
 	 *
-	 * ⚠️ **DEPRECATED**: 由于底层依赖异步操作（unified processor），此方法无法提供真正的同步转换。
-	 * 请使用 `convertAsync()` 方法代替。
+	 * ⚠️ **DEPRECATED**: This method cannot provide true synchronous conversion due to underlying async dependencies (unified processor).
+	 * Please use `convertAsync()` instead.
 	 *
-	 * @deprecated 使用 convertAsync() 代替
-	 * @param markdown - 要转换的 Markdown 内容
-	 * @param options - 转换配置选项
-	 * @returns 转换后的 Typst 字符串
-	 * @throws 始终抛出错误，引导使用 convertAsync()
+	 * @deprecated Use convertAsync() instead
+	 * @param markdown - The Markdown content to convert
+	 * @param options - Conversion options
+	 * @returns The converted Typst string
+	 * @throws Always throws an error to direct usage to convertAsync()
 	 *
 	 * @example
 	 * ```typescript
-	 * // ❌ 错误用法（已废弃）
+	 * // ❌ Incorrect usage (deprecated)
 	 * // const typst = window.bon.typst.convert("# Hello");
 	 *
-	 * // ✅ 正确用法（使用异步方法）
+	 * // ✅ Correct usage (use async)
 	 * const typst = await window.bon.typst.convertAsync("# Hello");
 	 * console.log(typst); // "= Hello"
 	 *
-	 * // 使用选项
+	 * // With options
 	 * const typst = await window.bon.typst.convertAsync(
 	 *   "# Title\n\n[[link]] and ==highlight==",
 	 *   { transformMode: 'ast', maxEmbedDepth: 5 }
@@ -53,19 +53,19 @@ export class TypstAPI implements TypstAPIInterface {
 	}
 
 	/**
-	 * 异步转换 Markdown 内容或文件（支持文件和字符串输入）
+	 * Asynchronously convert Markdown content or file (supports both file and string input)
 	 *
-	 * @param input - Markdown 字符串或 Obsidian TFile 对象
-	 * @param options - 转换配置选项
-	 * @returns Promise，解析为转换后的 Typst 字符串
-	 * @throws 如果转换失败、文件读取失败或配置无效
+	 * @param input - Markdown string or Obsidian TFile object
+	 * @param options - Conversion options
+	 * @returns Promise resolving to the converted Typst string
+	 * @throws If conversion fails, file reading fails, or configuration is invalid
 	 *
 	 * @example
 	 * ```typescript
-	 * // 转换字符串
+	 * // Convert string
 	 * const typst = await window.bon.typst.convertAsync("# Hello");
 	 *
-	 * // 转换文件
+	 * // Convert file
 	 * const file = app.workspace.getActiveFile();
 	 * if (file) {
 	 *   const typst = await window.bon.typst.convertAsync(file, {
@@ -74,7 +74,7 @@ export class TypstAPI implements TypstAPIInterface {
 	 *   });
 	 * }
 	 *
-	 * // 在 DataviewJS 中使用
+	 * // Use in DataviewJS
 	 * const files = dv.pages("#report").file;
 	 * for (const file of files) {
 	 *   const typst = await window.bon.typst.convertAsync(file);
@@ -94,12 +94,12 @@ export class TypstAPI implements TypstAPIInterface {
 		);
 
 		try {
-			// 处理字符串输入
+			// Handle string input
 			if (typeof input === "string") {
 				return await this.convertString(input, options);
 			}
 
-			// 处理 TFile 输入
+			// Handle TFile input
 			if (this.isTFile(input)) {
 				return await this.convertFile(input, options);
 			}
@@ -116,16 +116,16 @@ export class TypstAPI implements TypstAPIInterface {
 	}
 
 	/**
-	 * 获取所有可用的 Typst 转换脚本列表
+	 * Get a list of all available Typst conversion scripts
 	 *
-	 * @returns Promise，解析为脚本名称数组
+	 * @returns Promise resolving to an array of script names
 	 *
 	 * @example
 	 * ```typescript
 	 * const scripts = await window.bon.typst.listScripts();
 	 * console.log(scripts); // ["default", "academic", "resume"]
 	 *
-	 * // 使用返回的脚本名称
+	 * // Use the returned script name
 	 * const typst = await window.bon.typst.convertAsync(markdown, {
 	 *   transformMode: 'script',
 	 *   scriptName: scripts[0]
@@ -146,65 +146,65 @@ export class TypstAPI implements TypstAPIInterface {
 	}
 
 	/**
-	 * 转换字符串（内部方法）
+	 * Convert a string (internal method)
 	 */
 	private async convertString(
 		markdown: string,
 		options?: ConvertOptions
 	): Promise<string> {
-		// 边界检查
+		// Boundary check
 		if (markdown.length === 0) {
 			console.warn("[Typst API] Empty markdown string provided");
 			return "";
 		}
 
-		// 验证配置
+		// Validate configuration
 		this.validateOptions(options);
 
-		// 调用转换器
+		// Call the converter
 		return await this.converter.convertMarkdown(markdown, {
 			transformMode: options?.transformMode,
 			scriptName: options?.scriptName,
 			maxEmbedDepth: options?.maxEmbedDepth,
-			currentFile: undefined, // 字符串模式下没有当前文件
+			currentFile: undefined, // There is no current file in string mode
 		});
 	}
 
 	/**
-	 * 转换文件（内部方法）
+	 * Convert a file (internal method)
 	 *
-	 * 行为说明：
-	 * - 如果指定 autoCompile=true，将调用 converter.convertFile() 执行完整的转换+编译流程（有副作用：写入 .typ 和 .pdf 文件）
-	 * - 否则只进行纯转换，返回 Typst 字符串（无副作用）
+	 * Behavior:
+	 * - If autoCompile=true is specified, calls converter.convertFile() for full conversion + compilation (side effect: writes .typ and .pdf files)
+	 * - Otherwise, only performs a pure conversion and returns the Typst string (no side effect)
 	 */
 	private async convertFile(
 		file: TFile,
 		options?: ConvertOptions
 	): Promise<string> {
-		// 边界检查
+		// Boundary check
 		if (file.extension.toLowerCase() !== "md") {
 			throw new Error(
 				`[Typst API] Invalid file type: "${file.extension}". Only Markdown (.md) files are supported.`
 			);
 		}
 
-		// 验证配置
+		// Validate configuration
 		this.validateOptions(options);
 
-		// 获取元数据（用于脚本选择和转换）
+		// Get metadata (for script selection and conversion)
 		const metadata = this.app.metadataCache.getFileCache(file);
 
-		// 场景 1：需要自动编译（有副作用：写入文件和编译）
+		// Case 1: Need auto-compile (side effect: write file and compile)
 		if (options?.autoCompile) {
 			const silent = options.silent ?? false;
 
-			// 步骤 1：调用底层的 convertFile()，写入 .typ 文件
+			// Step 1: Call underlying convertFile(), write .typ file
 			await this.converter.convertFile(file, metadata, { silent });
 
-			// 步骤 2：手动触发编译（因为 autoCompile 参数不在 converter 的 settings 中）
+			// Step 2: Manually trigger compilation (since autoCompile is not in converter's settings)
 			const typstPath = file.path.replace(/\.md$/, ".typ");
 			try {
-				await this.converter.compileTypstFile(typstPath, silent);
+				await this.converter.compileTypstFile(typstPath, "pdf", silent);
 			} catch (error) {
 				const message =
 					error instanceof Error ? error.message : String(error);
@@ -212,13 +212,13 @@ export class TypstAPI implements TypstAPIInterface {
 					`[Typst API] Compilation failed for "${typstPath}":`,
 					message
 				);
-				// 编译失败不抛出异常，因为转换本身已成功
+				// Do not throw on compile error, since conversion itself succeeded
 				if (!silent) {
-					// Notice 已在 compileTypstFile 中显示，这里只记录日志
+					// Notice has already been shown in compileTypstFile, just log here
 				}
 			}
 
-			// 步骤 3：读取生成的 .typ 文件内容并返回
+			// Step 3: Read the generated .typ file content and return
 			try {
 				return await this.app.vault.adapter.read(typstPath);
 			} catch (error) {
@@ -230,8 +230,8 @@ export class TypstAPI implements TypstAPIInterface {
 			}
 		}
 
-		// 场景 2：仅转换，不写入文件（无副作用）
-		// 读取文件内容
+		// Case 2: Pure conversion only, do not write file (no side effect)
+		// Read file content
 		let markdown: string;
 		try {
 			markdown = await this.app.vault.read(file);
@@ -243,7 +243,7 @@ export class TypstAPI implements TypstAPIInterface {
 			);
 		}
 
-		// 调用转换器
+		// Call the converter
 		return await this.converter.convertMarkdown(markdown, {
 			transformMode: options?.transformMode,
 			scriptName: options?.scriptName,
@@ -253,12 +253,12 @@ export class TypstAPI implements TypstAPIInterface {
 	}
 
 	/**
-	 * 验证转换选项（内部方法）
+	 * Validate conversion options (internal method)
 	 */
 	private validateOptions(options?: ConvertOptions): void {
 		if (!options) return;
 
-		// 验证 transformMode
+		// Validate transformMode
 		if (options.transformMode) {
 			if (!["ast", "script"].includes(options.transformMode)) {
 				throw new Error(
@@ -267,7 +267,7 @@ export class TypstAPI implements TypstAPIInterface {
 			}
 		}
 
-		// 验证 maxEmbedDepth
+		// Validate maxEmbedDepth
 		if (
 			options.maxEmbedDepth !== undefined &&
 			(typeof options.maxEmbedDepth !== "number" ||
@@ -278,7 +278,7 @@ export class TypstAPI implements TypstAPIInterface {
 			);
 		}
 
-		// 验证 scriptName（仅警告，不阻止）
+		// Validate scriptName (warn only, do not block)
 		if (
 			options.scriptName &&
 			options.transformMode !== "script" &&
@@ -291,7 +291,7 @@ export class TypstAPI implements TypstAPIInterface {
 	}
 
 	/**
-	 * 检查对象是否为 TFile（内部方法）
+	 * Check if an object is a TFile (internal method)
 	 */
 	private isTFile(obj: unknown): obj is TFile {
 		return (

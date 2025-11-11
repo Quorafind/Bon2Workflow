@@ -3,94 +3,36 @@ import { normalizePath, Vault } from "obsidian";
 const DEFAULT_SCRIPT_NAME = "default";
 const DEFAULT_SCRIPT_FILENAME = `${DEFAULT_SCRIPT_NAME}.js`;
 const DEFAULT_SCRIPT_CONTENT = `/**
- * 默认 Markdown -> Typst 转换脚本
- * 支持 Obsidian 特殊语法
- * @param {string} content - Markdown 文件内容
- * @returns {string} - Typst 格式内容
+ * Default Script Example: Set Typst Document Template
+ *
+ * For complex transformation logic, use API calls outside the sandbox.
+ * This script demonstrates how to set a basic Typst document template only.
+ *
+ * @param {string} content - Document content
+ * @returns {string} - Typst code with template settings applied
  */
 function transform(content) {
-	let result = content;
+	// Basic template settings example
+	const template = \`#set page(
+  paper: "a4",
+  margin: (x: 1.8cm, y: 1.5cm),
+)
 
-	// ========== 阶段 1: 移除 frontmatter ==========
-	result = result.replace(/^---[\\s\\S]*?---\\n?/, "");
+#set text(
+  font: "Noto Serif CJK SC",
+  size: 10.5pt,
+  lang: "zh",
+)
 
-	// ========== 阶段 2: 处理 Obsidian 特殊语法 ==========
+#set par(
+  justify: true,
+  leading: 0.65em,
+)
 
-	// 2.1 移除 Obsidian 注释 (%%注释%%)
-	result = result.replace(/%%[\\s\\S]*?%%/g, "");
+\`;
 
-	// 2.2 处理嵌入内容 ![[文件]] -> [嵌入: 文件]
-	result = result.replace(/!\\[\\[([^\\]]+)\\]\\]/g, "[嵌入: $1]");
-
-	// 2.3 处理 Wiki 链接 [[链接|显示文本]] 或 [[链接]]
-	result = result.replace(/\\[\\[([^\\]|]+)\\|([^\\]]+)\\]\\]/g, "$2");  // [[link|text]] -> text
-	result = result.replace(/\\[\\[([^\\]]+)\\]\\]/g, "$1");  // [[link]] -> link
-
-	// 2.4 处理高亮 ==文本== -> Typst 内置 highlight 函数
-	result = result.replace(/==([^=]+)==/g, "#highlight[$1]");
-
-	// 2.5 处理任务列表
-	result = result.replace(/^(\\s*)-\\s+\\[x\\]\\s+/gm, "$1☑ ");  // 已完成
-	result = result.replace(/^(\\s*)-\\s+\\[ \\]\\s+/gm, "$1☐ ");  // 未完成
-
-	// 2.6 处理 Callouts (简化处理: > [!type] -> 【type】)
-	result = result.replace(/^>\\s*\\[!([^\\]]+)\\]/gm, "*【$1】*");
-
-	// 2.7 转义 Obsidian 标签 (关键: 必须在标题转换之前!)
-	// 匹配行内标签: #标签 但不是标题开头
-	// 标题模式: ^#{1,6}\\s+  (行首 + 1-6个# + 空格)
-	// 标签模式: #\\S+  (# + 非空白字符, 但不在行首或前面有空格)
-
-	// 先用占位符保护标题
-	const headingPlaceholders = [];
-	result = result.replace(/^(#{1,6}\\s+.+)$/gm, (match) => {
-		const index = headingPlaceholders.length;
-		headingPlaceholders.push(match);
-		return \`__HEADING_PLACEHOLDER_\${index}__\`;
-	});
-
-	// 现在可以安全地转义所有 # 标签
-	result = result.replace(/#([^\\s#][^\\s]*)/g, "\\\\#$1");
-
-	// 恢复标题
-	headingPlaceholders.forEach((heading, index) => {
-		result = result.replace(\`__HEADING_PLACEHOLDER_\${index}__\`, heading);
-	});
-
-	// ========== 阶段 3: 标准 Markdown -> Typst 转换 ==========
-
-	// 3.1 标题转换 (# -> = Heading)
-	result = result.replace(/^######\\s+(.+)$/gm, '====== $1');
-	result = result.replace(/^#####\\s+(.+)$/gm, '===== $1');
-	result = result.replace(/^####\\s+(.+)$/gm, '==== $1');
-	result = result.replace(/^###\\s+(.+)$/gm, '=== $1');
-	result = result.replace(/^##\\s+(.+)$/gm, '== $1');
-	result = result.replace(/^#\\s+(.+)$/gm, '= $1');
-
-	// 3.2 粗体 (**text** -> *text*)
-	result = result.replace(/\\*\\*(.+?)\\*\\*/g, "*$1*");
-
-	// 3.3 斜体 (*text* -> _text_)
-	result = result.replace(/(?<!\\*)\\*(?!\\*)(.+?)\\*(?!\\*)/g, "_$1_");
-
-	// 3.4 行内代码保持不变 (\`code\`)
-	// Typst 也使用反引号,保持不变
-
-	// 3.5 链接 ([text](url) -> #link("url")[text])
-	result = result.replace(/\\[(.+?)\\]\\((.+?)\\)/g, '#link("$2")[$1]');
-
-	// 3.6 图片 (![alt](url) -> #image("url"))
-	result = result.replace(/!\\[(.+?)\\]\\((.+?)\\)/g, '#image("$2")');
-
-	// 3.7 代码块保持不变
-	// Markdown 和 Typst 都使用 \`\`\`
-
-	// ========== 阶段 4: 清理和最终处理 ==========
-
-	// 4.1 清理多余的空行 (超过2个连续空行 -> 2个空行)
-	result = result.replace(/\\n{3,}/g, "\\n\\n");
-
-	return result;
+	// Return template + content
+	return template + content;
 }
 `;
 
@@ -102,6 +44,9 @@ export class TypstScriptManager {
 		this.scriptDirectory = normalizePath(scriptDir || "typst-scripts");
 	}
 
+	/**
+	 * Ensure the script directory exists in the vault.
+	 */
 	async ensureScriptDirectory(): Promise<void> {
 		const adapter = this.vault.adapter;
 		const exists = await adapter.exists(this.scriptDirectory);
@@ -110,6 +55,9 @@ export class TypstScriptManager {
 		}
 	}
 
+	/**
+	 * Initialize the default script if it does not exist.
+	 */
 	async initializeDefaultScript(): Promise<void> {
 		await this.ensureScriptDirectory();
 		const defaultPath = this.getScriptPath(DEFAULT_SCRIPT_NAME);
@@ -121,11 +69,17 @@ export class TypstScriptManager {
 		}
 	}
 
+	/**
+	 * Get the content of the default script.
+	 */
 	async getDefaultScript(): Promise<string> {
 		await this.initializeDefaultScript();
 		return DEFAULT_SCRIPT_CONTENT;
 	}
 
+	/**
+	 * List available script names (without file extension).
+	 */
 	async listScripts(): Promise<string[]> {
 		await this.ensureScriptDirectory();
 		const listing = await this.vault.adapter.list(this.scriptDirectory);
@@ -135,6 +89,9 @@ export class TypstScriptManager {
 			.map((file) => file.replace(/\.js$/, ""));
 	}
 
+	/**
+	 * Load script content by script name. Returns default script if not found.
+	 */
 	async loadScript(scriptName: string): Promise<string> {
 		const normalized =
 			this.normalizeScriptName(scriptName) || DEFAULT_SCRIPT_NAME;
@@ -158,6 +115,9 @@ export class TypstScriptManager {
 		return content;
 	}
 
+	/**
+	 * Save or update the script with provided content.
+	 */
 	async saveScript(scriptName: string, content: string): Promise<void> {
 		const normalized = this.normalizeScriptName(scriptName);
 		this.validateScriptName(normalized);
@@ -169,11 +129,14 @@ export class TypstScriptManager {
 		this.scriptCache.set(normalized, content);
 	}
 
+	/**
+	 * Delete a script by name. The default script cannot be deleted.
+	 */
 	async deleteScript(scriptName: string): Promise<void> {
 		const normalized = this.normalizeScriptName(scriptName);
 		this.validateScriptName(normalized);
 		if (normalized === DEFAULT_SCRIPT_NAME) {
-			throw new Error("默认脚本不可删除");
+			throw new Error("The default script cannot be deleted");
 		}
 
 		const path = this.getScriptPath(normalized);
@@ -184,24 +147,32 @@ export class TypstScriptManager {
 		this.scriptCache.delete(normalized);
 	}
 
+	/**
+	 * Get full script file path in the vault.
+	 */
 	private getScriptPath(scriptName: string): string {
 		return normalizePath(`${this.scriptDirectory}/${scriptName}.js`);
 	}
 
+	/**
+	 * Normalize script name (no extension, trimmed).
+	 */
 	private normalizeScriptName(scriptName: string): string {
 		return scriptName.trim().replace(/\.js$/, "");
 	}
 
+	/**
+	 * Validate script name (required, no path separator).
+	 */
 	private validateScriptName(scriptName: string): void {
 		if (!scriptName) {
-			throw new Error("脚本名称不能为空");
+			throw new Error("Script name cannot be empty");
 		}
 
-		if (/[\\/]/.test(scriptName)) {
-			throw new Error("脚本名称不可包含路径分隔符");
+		if (/[\/\\]/.test(scriptName)) {
+			throw new Error("Script name cannot contain path separators");
 		}
 	}
 }
 
 export { DEFAULT_SCRIPT_CONTENT, DEFAULT_SCRIPT_NAME, DEFAULT_SCRIPT_FILENAME };
-

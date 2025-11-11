@@ -13,6 +13,7 @@ import { markdownToTypst, type EmbedEnvironment } from "./transformer";
 
 interface ConvertOptions {
 	silent?: boolean;
+	format?: "pdf" | "png" | "svg";
 }
 
 export interface MarkdownConvertOptions {
@@ -23,9 +24,9 @@ export interface MarkdownConvertOptions {
 }
 
 /**
- * 预览更新回调函数
- * @param file 源文件
- * @param typstCode 转换后的 Typst 代码
+ * Preview update callback function
+ * @param file The source file
+ * @param typstCode The converted Typst code
  */
 export type PreviewUpdateCallback = (
 	file: TFile,
@@ -49,7 +50,7 @@ export class TypstConverter {
 	}
 
 	/**
-	 * 设置预览更新回调
+	 * Set preview update callback
 	 */
 	setPreviewUpdateCallback(callback: PreviewUpdateCallback | null): void {
 		this.previewUpdateCallback = callback;
@@ -64,7 +65,11 @@ export class TypstConverter {
 		return tags.some((tag) => this.triggerTagSet.has(tag));
 	}
 
-	selectScript(file: TFile, metadata: CachedMetadata | null): string {
+	/**
+	 * Select script name to use for transformation
+	 * @returns The script name, or null if not explicitly specified (indicates AST mode should be used)
+	 */
+	selectScript(file: TFile, metadata: CachedMetadata | null): string | null {
 		const frontmatter = metadata?.frontmatter ?? {};
 		const frontmatterScript = frontmatter["typst-script"];
 		if (typeof frontmatterScript === "string" && frontmatterScript.trim()) {
@@ -78,7 +83,8 @@ export class TypstConverter {
 			return this.normalizeScriptName(mapping[folderPath]);
 		}
 
-		return "default";
+		// No script explicitly specified, return null (use AST mode)
+		return null;
 	}
 
 	async convertFile(
@@ -90,9 +96,15 @@ export class TypstConverter {
 
 		try {
 			const markdown = await this.app.vault.read(file);
+
+			// Dynamically determine the transformation mode: use script mode if a script is specified, otherwise use ast mode
+			const selectedScript = this.selectScript(file, cache);
+			const effectiveTransformMode =
+				selectedScript !== null ? "script" : "ast";
+
 			const typstContent = await this.convertMarkdown(markdown, {
-				transformMode: this.settings.transformMode,
-				scriptName: this.selectScript(file, cache),
+				transformMode: effectiveTransformMode,
+				scriptName: selectedScript ?? undefined,
 				maxEmbedDepth: this.settings.maxEmbedDepth,
 				currentFile: file.path,
 			});
@@ -101,10 +113,10 @@ export class TypstConverter {
 			await this.writeTypstFile(typstPath, typstContent);
 
 			if (!options.silent) {
-				new Notice(`Typst 文件已更新: ${typstPath}`);
+				new Notice(`Typst file updated: ${typstPath}`);
 			}
 
-			// 触发预览更新
+			// Trigger preview update (according to preview mode)
 			if (this.previewUpdateCallback) {
 				try {
 					await this.previewUpdateCallback(file, typstContent);
@@ -113,24 +125,26 @@ export class TypstConverter {
 				}
 			}
 
+			// Auto-compile (if enabled)
 			if (this.settings.autoCompile) {
-				await this.compileTypstFile(typstPath, options.silent);
+				const format = this.settings.compileFormat ?? "pdf";
+				await this.compileTypstFile(typstPath, format, options.silent);
 			}
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : String(error);
-			new Notice(`Typst 转换失败: ${message}`);
+			new Notice(`Typst conversion failed: ${message}`);
 			throw error;
 		}
 	}
 
 	/**
-	 * 将 Markdown 字符串转换为 Typst 格式
-	 * 这是一个公共方法，可供 API 层调用
+	 * Converts a Markdown string to Typst format
+	 * This is a public method available to the API layer.
 	 *
-	 * @param markdown - Markdown 内容
-	 * @param options - 转换选项
-	 * @returns Promise，解析为 Typst 字符串
+	 * @param markdown - Markdown content
+	 * @param options - Transform options
+	 * @returns Promise resolving to Typst string
 	 */
 	public async convertMarkdown(
 		markdown: string,
@@ -145,7 +159,15 @@ export class TypstConverter {
 
 		if (transformMode === "script") {
 			const scriptCode = await this.scriptManager.loadScript(scriptName);
-			return executeSandbox(scriptCode, markdown);
+
+			// Create and inject AST conversion function into the sandbox
+			const convertFn = this.createAstConverter(
+				currentFile ?? "",
+				maxEmbedDepth
+			);
+
+			// Pass the conversion function into the sandbox
+			return await executeSandbox(scriptCode, markdown, convertFn);
 		} else {
 			const embedEnvironment: EmbedEnvironment = {
 				app: this.app,
@@ -170,7 +192,11 @@ export class TypstConverter {
 	): Promise<string> {
 		const scriptName = this.selectScript(file, metadata);
 		const scriptCode = await this.scriptManager.loadScript(scriptName);
-		return executeSandbox(scriptCode, markdown);
+
+		// Create and inject AST conversion function into the sandbox
+		const convertFn = this.createAstConverter(file.path);
+
+		return await executeSandbox(scriptCode, markdown, convertFn);
 	}
 
 	private async runWithAstTransformer(
@@ -191,35 +217,98 @@ export class TypstConverter {
 		);
 	}
 
-	async compileTypstFile(typstPath: string, silent = false): Promise<void> {
+	/**
+	 * Compile Typst file to the specified format
+	 * @param typstPath Typst source file path
+	 * @param format Output format (pdf/png/svg)
+	 * @param silent Silent mode
+	 * @returns Output file path
+	 */
+	async compileTypstFile(
+		typstPath: string,
+		format: "pdf" | "png" | "svg" = "pdf",
+		silent = false
+	): Promise<string> {
 		const adapter = this.app.vault.adapter;
 		if (!(adapter instanceof FileSystemAdapter)) {
-			new Notice("当前存储类型不支持自动编译 Typst 文件");
-			return;
+			throw new Error(
+				"The current storage adapter does not support automatic Typst compilation"
+			);
 		}
 
 		const fullPath = adapter.getFullPath(typstPath);
-		// 获取 vault 根目录作为 Typst 项目根目录
-		// adapter.getFullPath("") 返回 vault 根目录的绝对路径
 		const vaultRoot = adapter.getFullPath("");
 
+		// Build output path
+		// For PNG format, use a folder to store multipage documents
+		let outputPath: string;
+		let fullOutputPath: string;
+
+		if (format === "png") {
+			// PNG: create folder and generate folder/{n}.png
+			const basePath = typstPath.replace(/\.typ$/, "");
+			const folderPath = `${basePath}-pages`;
+
+			// Ensure folder existence
+			const folderExists = await this.app.vault.adapter.exists(
+				folderPath
+			);
+			if (!folderExists) {
+				await this.app.vault.createFolder(folderPath);
+			}
+
+			outputPath = `${folderPath}/{n}.${format}`;
+			fullOutputPath = adapter.getFullPath(outputPath);
+		} else {
+			outputPath = typstPath.replace(/\.typ$/, `.${format}`);
+			fullOutputPath = adapter.getFullPath(outputPath);
+		}
+
 		await new Promise<void>((resolve, reject) => {
-			// 添加 --root 参数，允许访问 vault 内所有文件
-			const command = `typst compile --root "${vaultRoot}" "${fullPath}"`;
+			// Add --root argument to allow access to all files in the vault
+			const command = `typst compile --root "${vaultRoot}" --format ${format} "${fullPath}" "${fullOutputPath}"`;
 			exec(command, (error, stdout, stderr) => {
 				if (error) {
 					const message = stderr || stdout || error.message;
-					new Notice(`Typst 编译失败: ${message}`);
+					new Notice(`Typst Compile Error: ${message}`);
 					reject(error);
 					return;
 				}
 
 				if (!silent) {
-					new Notice(`Typst 编译完成: ${typstPath}`);
+					new Notice(`Typst Compile Success: ${outputPath}`);
 				}
 				resolve();
 			});
 		});
+
+		// For PNG format, return the folder path
+		if (format === "png") {
+			const folderPath = outputPath.replace("/{n}.png", "");
+			return folderPath;
+		}
+		return outputPath;
+	}
+
+	/**
+	 * Create AST converter function (for injection into the sandbox)
+	 *
+	 * @param currentFile - Current file path
+	 * @param maxEmbedDepth - Max embed depth
+	 * @returns Async converter function
+	 */
+	private createAstConverter(
+		currentFile: string,
+		maxEmbedDepth: number = this.settings.maxEmbedDepth
+	): (md: string) => Promise<string> {
+		return async (md: string): Promise<string> => {
+			const embedEnvironment: EmbedEnvironment = {
+				app: this.app,
+				vault: this.app.vault,
+				currentFile,
+			};
+			return markdownToTypst(md, { maxEmbedDepth }, embedEnvironment);
+		};
 	}
 
 	private extractTags(metadata: CachedMetadata | null): string[] {

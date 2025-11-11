@@ -7,10 +7,20 @@ export interface BonbonSettings {
 	};
 	enableCount: boolean;
 	typst: TypstSettings;
+	folderCheck: foderCheckSettings;
+}
+
+export interface foderCheckSettings {
+	enabled: boolean;
+	targetPath: string;
 }
 
 export const BONBON_SETTINGS: BonbonSettings = {
 	historyChars: {},
 	enableCount: true,
 	typst: DEFAULT_TYPST_SETTINGS,
+	folderCheck: {
+		enabled: false,
+		targetPath: "TODO.md",
+	},
 };
