@@ -31,7 +31,7 @@
 	},
 	"dependencies": {
 		"@codemirror/basic-setup": "^0.20.0",
-		"@codemirror/state": "^6.5.2",
+		"@codemirror/state": "6.5.0",
 		"@codemirror/view": "^6.38.6",
 		"@myriaddreamin/typst-ts-renderer": "0.6.1-rc5",
 		"@myriaddreamin/typst.ts": "0.6.1-rc5",
