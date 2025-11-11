@@ -6,11 +6,18 @@ import {
 	Setting,
 	TextAreaComponent,
 	TextComponent,
+	ButtonComponent,
 } from "obsidian";
 import type BonWorkflow from "../main";
 import { DEFAULT_SCRIPT_CONTENT } from "./typstScriptManager";
 import type { TypstScriptManager } from "./typstScriptManager";
-import type { TypstSettings } from "./typstSettings";
+import type { TypstSettings, TypstTransformMode } from "./typstSettings";
+import { BonWorkflowSettingTab } from "../settingTab";
+import {
+	downloadAndCacheWasm,
+	loadLocalWasmFile,
+	WasmStorageInfo,
+} from "./typstWasmStorage";
 
 interface ScriptEditorModalOptions {
 	mode: "create" | "edit";
@@ -20,10 +27,7 @@ interface ScriptEditorModalOptions {
 }
 
 class ScriptEditorModal extends Modal {
-	constructor(
-		app: App,
-		private readonly options: ScriptEditorModalOptions
-	) {
+	constructor(app: App, private readonly options: ScriptEditorModalOptions) {
 		super(app);
 	}
 
@@ -33,15 +37,15 @@ class ScriptEditorModal extends Modal {
 
 		const title =
 			this.options.mode === "create"
-				? "新建 Typst 脚本"
-				: `编辑脚本：${this.options.scriptName}`;
-		contentEl.createEl("h2", { text: title });
+				? "Create Typst Script"
+				: `Edit Script: ${this.options.scriptName}`;
+		new Setting(contentEl).setHeading().setName(title);
 
 		let nameInput: TextComponent | null = null;
 		if (this.options.mode === "create") {
 			new Setting(contentEl)
-				.setName("脚本名称")
-				.setDesc("仅输入名称，无需 .js 后缀")
+				.setName("Script Name")
+				.setDesc("Enter the name only, no .js suffix required")
 				.addText((text) => {
 					nameInput = text;
 					text.setPlaceholder("report").setValue(
@@ -50,7 +54,7 @@ class ScriptEditorModal extends Modal {
 				});
 		} else {
 			contentEl.createEl("p", {
-				text: `当前脚本：${this.options.scriptName}`,
+				text: `Current script: ${this.options.scriptName}`,
 			});
 		}
 
@@ -62,11 +66,11 @@ class ScriptEditorModal extends Modal {
 			.setValue(this.options.initialContent);
 
 		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
-		const cancelButton = buttons.createEl("button", { text: "取消" });
+		const cancelButton = buttons.createEl("button", { text: "Cancel" });
 		cancelButton.addEventListener("click", () => this.close());
 
 		const submitButton = buttons.createEl("button", {
-			text: "保存",
+			text: "Save",
 			cls: "mod-cta",
 		});
 		submitButton.addEventListener("click", async () => {
@@ -76,15 +80,12 @@ class ScriptEditorModal extends Modal {
 					: this.options.scriptName ?? "";
 			const sanitizedName = rawName.replace(/[\\\/]/g, "").trim();
 			if (!sanitizedName) {
-				new Notice("脚本名称不能为空");
+				new Notice("Script name cannot be empty");
 				return;
 			}
 
 			try {
-				await this.options.onSubmit(
-					sanitizedName,
-					editor.getValue()
-				);
+				await this.options.onSubmit(sanitizedName, editor.getValue());
 				this.close();
 			} catch (error) {
 				const message =
@@ -113,7 +114,7 @@ async function refreshScriptOptions(
 	if (!scripts.length) {
 		const option = document.createElement("option");
 		option.value = "";
-		option.textContent = "暂无脚本";
+		option.textContent = "No scripts available";
 		selectEl.appendChild(option);
 		dropdown.setDisabled(true);
 		return [];
@@ -134,24 +135,48 @@ async function refreshScriptOptions(
 
 export function renderTypstSettings(
 	containerEl: HTMLElement,
-	plugin: BonWorkflow
+	plugin: BonWorkflow,
+	settingTab: BonWorkflowSettingTab
 ) {
 	const typstSettings = plugin.settings.typst as TypstSettings | undefined;
 	const manager = plugin.getTypstScriptManager();
 
 	const section = containerEl.createDiv({ cls: "typst-settings" });
-	section.createEl("h3", { text: "Typst Workflow Settings" });
+
+	new Setting(section).setHeading().setName("Typst workflow settings");
+
+	new Setting(section).setName("Enable Typst").addToggle((toggle) =>
+		toggle.setValue(typstSettings.enabled).onChange(async (value) => {
+			typstSettings.enabled = value;
+			await plugin.saveSettings();
+			if (value) {
+				await plugin.refreshTypstFeatures();
+			} else {
+				await plugin.unloadTypstFeatures();
+			}
+
+			setTimeout(() => {
+				settingTab.display();
+			}, 800);
+		})
+	);
+
+	if (!typstSettings.enabled) {
+		return;
+	}
 
 	if (!typstSettings) {
 		section.createEl("p", {
-			text: "Typst 设置未初始化，请稍后重试。",
+			text: "Typst settings not initialized, please try again later.",
 		});
 		return;
 	}
 
 	new Setting(section)
-		.setName("触发标签")
-		.setDesc("frontmatter 中包含任一标签时会触发 Typst 转换")
+		.setName("Trigger Tags")
+		.setDesc(
+			"Typst conversion is triggered if any of these tags are present in frontmatter"
+		)
 		.addText((text) => {
 			text.setPlaceholder("bon-typst")
 				.setValue(typstSettings.triggerTags.join(", "))
@@ -170,8 +195,10 @@ export function renderTypstSettings(
 		});
 
 	new Setting(section)
-		.setName("自动编译 Typst")
-		.setDesc("转换完成后自动运行 typst compile（需安装 Typst CLI）")
+		.setName("Auto Compile Typst")
+		.setDesc(
+			"Automatically run `typst compile` after conversion (Typst CLI required)"
+		)
 		.addToggle((toggle) =>
 			toggle
 				.setValue(typstSettings.autoCompile)
@@ -181,10 +208,83 @@ export function renderTypstSettings(
 				})
 		);
 
+	new Setting(section)
+		.setName("Transform Engine")
+		.setDesc(
+			"Choose built-in AST transform or continue using custom scripts"
+		)
+		.addDropdown((dropdown) => {
+			dropdown.addOption("ast", "Built-in AST");
+			dropdown.addOption("script", "Custom Script");
+			dropdown
+				.setValue(typstSettings.transformMode ?? "ast")
+				.onChange(async (value) => {
+					typstSettings.transformMode = value as TypstTransformMode;
+					await plugin.saveSettings();
+					await plugin.refreshTypstFeatures();
+					new Notice("Typst transform engine updated");
+				});
+		});
+	new Setting(section)
+		.setName("Max Embed Depth")
+		.setDesc(
+			"Limit the recursion depth of ![[file]] embeds to avoid cyclic references"
+		)
+		.addSlider((slider) => {
+			slider
+				.setLimits(1, 10, 1)
+				.setDynamicTooltip()
+				.setValue(typstSettings.maxEmbedDepth ?? 5)
+				.onChange(async (value) => {
+					typstSettings.maxEmbedDepth = value;
+					await plugin.saveSettings();
+				});
+		});
+
+	// 代码块渲染设置
+	new Setting(section).setHeading().setName("Code Block Rendering");
+	new Setting(section)
+		.setName("Enable Typst Code Block Rendering")
+		.setDesc(
+			"Render typst code blocks as SVG in reading mode (uses WASM, no CLI required)"
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(typstSettings.enableCodeBlock ?? true)
+				.onChange(async (value) => {
+					typstSettings.enableCodeBlock = value;
+					await plugin.saveSettings();
+					new Notice(
+						value
+							? "Typst code block rendering enabled. Please reload to take effect."
+							: "Typst code block rendering disabled. Please reload to take effect."
+					);
+				})
+		);
+
+	// WASM 管理设置
+	renderWasmManagementSettings(section, plugin);
+
+	new Setting(section)
+		.setName("Code Block Cache Size")
+		.setDesc(
+			"Number of compiled SVG results to cache (larger = more memory)"
+		)
+		.addSlider((slider) => {
+			slider
+				.setLimits(10, 500, 10)
+				.setDynamicTooltip()
+				.setValue(typstSettings.codeBlockCacheSize ?? 100)
+				.onChange(async (value) => {
+					typstSettings.codeBlockCacheSize = value;
+					await plugin.saveSettings();
+				});
+		});
+
 	let pendingDirectory = typstSettings.scriptDirectory;
 	new Setting(section)
-		.setName("脚本目录")
-		.setDesc("Vault 相对路径，用于存放 Typst 转换脚本")
+		.setName("Script Directory")
+		.setDesc("Vault-relative path for storing Typst transform scripts")
 		.addText((text) => {
 			text.setPlaceholder("typst-scripts")
 				.setValue(typstSettings.scriptDirectory)
@@ -198,7 +298,7 @@ export function renderTypstSettings(
 				typstSettings.scriptDirectory = pendingDirectory;
 				await plugin.saveSettings();
 				await plugin.refreshTypstFeatures();
-				new Notice("Typst 脚本目录已更新");
+				new Notice("Typst script directory updated");
 			});
 			text.inputEl.addEventListener("keydown", (event) => {
 				if (event.key === "Enter") {
@@ -208,10 +308,10 @@ export function renderTypstSettings(
 			});
 		});
 
-	section.createEl("h4", { text: "脚本管理" });
+	new Setting(section).setHeading().setName("Script Management");
 	const scriptSetting = new Setting(section)
-		.setName("脚本列表")
-		.setDesc("管理 Typst 转换脚本");
+		.setName("Script List")
+		.setDesc("Manage Typst transform scripts");
 
 	let dropdown: DropdownComponent | null = null;
 	scriptSetting.addDropdown((drop) => {
@@ -225,12 +325,12 @@ export function renderTypstSettings(
 			cachedScripts = await refreshScriptOptions(dropdown!, manager);
 		})();
 	} else {
-		scriptSetting.setDesc("脚本管理器尚未初始化");
+		scriptSetting.setDesc("Script manager is not initialized");
 	}
 
 	scriptSetting.addButton((button) =>
 		button
-			.setButtonText("新建")
+			.setButtonText("Create")
 			.setCta()
 			.setDisabled(!manager)
 			.onClick(() => {
@@ -242,7 +342,7 @@ export function renderTypstSettings(
 					initialContent: DEFAULT_SCRIPT_CONTENT,
 					onSubmit: async (name, content) => {
 						await manager.saveScript(name, content);
-						new Notice(`脚本 ${name} 已创建`);
+						new Notice(`Script ${name} created`);
 						cachedScripts = await refreshScriptOptions(
 							dropdown!,
 							manager
@@ -254,7 +354,7 @@ export function renderTypstSettings(
 
 	scriptSetting.addButton((button) =>
 		button
-			.setButtonText("编辑")
+			.setButtonText("Edit")
 			.setDisabled(!manager)
 			.onClick(async () => {
 				if (!manager || !dropdown) {
@@ -262,7 +362,7 @@ export function renderTypstSettings(
 				}
 				const scriptName = dropdown.getValue();
 				if (!scriptName) {
-					new Notice("请选择要编辑的脚本");
+					new Notice("Please select a script to edit");
 					return;
 				}
 				const content = await manager.loadScript(scriptName);
@@ -272,7 +372,7 @@ export function renderTypstSettings(
 					initialContent: content,
 					onSubmit: async (_name, updated) => {
 						await manager.saveScript(scriptName, updated);
-						new Notice(`脚本 ${scriptName} 已更新`);
+						new Notice(`Script ${scriptName} updated`);
 					},
 				}).open();
 			})
@@ -280,7 +380,7 @@ export function renderTypstSettings(
 
 	scriptSetting.addButton((button) =>
 		button
-			.setButtonText("删除")
+			.setButtonText("Delete")
 			.setDisabled(!manager)
 			.onClick(async () => {
 				if (!manager || !dropdown) {
@@ -288,12 +388,12 @@ export function renderTypstSettings(
 				}
 				const scriptName = dropdown.getValue();
 				if (!scriptName) {
-					new Notice("请选择要删除的脚本");
+					new Notice("Please select a script to delete");
 					return;
 				}
 				try {
 					await manager.deleteScript(scriptName);
-					new Notice(`脚本 ${scriptName} 已删除`);
+					new Notice(`Script ${scriptName} deleted`);
 					cachedScripts = await refreshScriptOptions(
 						dropdown!,
 						manager
@@ -308,4 +408,294 @@ export function renderTypstSettings(
 				}
 			})
 	);
+}
+
+/**
+ * CDN URLs for WASM files
+ */
+const WASM_CDN_URLS = {
+	compiler:
+		"https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm",
+	renderer:
+		"https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm",
+};
+
+/**
+ * 获取 WASM 版本号（从 CDN URL 推断）
+ */
+const WASM_VERSION = "latest"; // 可以从 package.json 读取
+
+/**
+ * 渲染 WASM 管理设置
+ */
+function renderWasmManagementSettings(
+	containerEl: HTMLElement,
+	plugin: BonWorkflow
+) {
+	new Setting(containerEl).setHeading().setName("WASM Module Management");
+
+	const wasmRenderer = plugin.getTypstWasmRenderer();
+	const storage = wasmRenderer?.getStorage();
+
+	if (!storage) {
+		new Setting(containerEl)
+			.setName("WASM Status")
+			.setDesc(
+				"WASM renderer not initialized. Enable code block rendering first."
+			);
+		return;
+	}
+
+	// WASM 状态显示
+	const statusSetting = new Setting(containerEl)
+		.setName("WASM Status")
+		.setDesc("Loading...");
+
+	// 更新状态显示
+	const updateStatus = async () => {
+		try {
+			const infos = await storage.listAll();
+			if (infos.length === 0) {
+				statusSetting.setDesc(
+					"⚠️ No WASM files cached. Download them to use code block rendering."
+				);
+			} else {
+				const statusLines = infos.map((info: WasmStorageInfo) => {
+					const sizeMB = (info.size / 1024 / 1024).toFixed(2);
+					return `✅ ${info.name}: v${info.version} (${sizeMB} MB)`;
+				});
+				statusSetting.setDesc(statusLines.join("\n"));
+			}
+		} catch (error) {
+			statusSetting.setDesc(
+				`❌ Error: ${
+					error instanceof Error ? error.message : String(error)
+				}`
+			);
+		}
+	};
+
+	void updateStatus();
+
+	// 下载按钮
+	new Setting(containerEl)
+		.setName("Download WASM from CDN")
+		.setDesc(
+			"Download WASM files from jsdelivr CDN and cache to IndexedDB (~6MB total)"
+		)
+		.addButton((button) =>
+			button.setButtonText("Download Compiler").onClick(async () => {
+				button.setDisabled(true);
+				button.setButtonText("Downloading...");
+
+				try {
+					await downloadAndCacheWasm(
+						WASM_CDN_URLS.compiler,
+						"compiler",
+						WASM_VERSION,
+						storage,
+						(loaded, total) => {
+							const percent = ((loaded / total) * 100).toFixed(0);
+							button.setButtonText(`${percent}%`);
+						}
+					);
+					new Notice("Compiler WASM downloaded successfully");
+					await updateStatus();
+				} catch (error) {
+					new Notice(
+						`Failed to download: ${
+							error instanceof Error
+								? error.message
+								: String(error)
+						}`
+					);
+				} finally {
+					button.setDisabled(false);
+					button.setButtonText("Download Compiler");
+				}
+			})
+		)
+		.addButton((button) =>
+			button.setButtonText("Download Renderer").onClick(async () => {
+				button.setDisabled(true);
+				button.setButtonText("Downloading...");
+
+				try {
+					await downloadAndCacheWasm(
+						WASM_CDN_URLS.renderer,
+						"renderer",
+						WASM_VERSION,
+						storage,
+						(loaded, total) => {
+							const percent = ((loaded / total) * 100).toFixed(0);
+							button.setButtonText(`${percent}%`);
+						}
+					);
+					new Notice("Renderer WASM downloaded successfully");
+					await updateStatus();
+				} catch (error) {
+					new Notice(
+						`Failed to download: ${
+							error instanceof Error
+								? error.message
+								: String(error)
+						}`
+					);
+				} finally {
+					button.setDisabled(false);
+					button.setButtonText("Download Renderer");
+				}
+			})
+		)
+		.addButton((button) =>
+			button
+				.setButtonText("Download Both")
+				.setCta()
+				.onClick(async () => {
+					button.setDisabled(true);
+					button.setButtonText("Downloading...");
+
+					try {
+						// 下载 compiler
+						await downloadAndCacheWasm(
+							WASM_CDN_URLS.compiler,
+							"compiler",
+							WASM_VERSION,
+							storage,
+							(loaded, total) => {
+								const percent = (
+									(loaded / total) *
+									100
+								).toFixed(0);
+								button.setButtonText(`Compiler: ${percent}%`);
+							}
+						);
+
+						// 下载 renderer
+						await downloadAndCacheWasm(
+							WASM_CDN_URLS.renderer,
+							"renderer",
+							WASM_VERSION,
+							storage,
+							(loaded, total) => {
+								const percent = (
+									(loaded / total) *
+									100
+								).toFixed(0);
+								button.setButtonText(`Renderer: ${percent}%`);
+							}
+						);
+
+						new Notice("Both WASM files downloaded successfully");
+						await updateStatus();
+					} catch (error) {
+						new Notice(
+							`Failed to download: ${
+								error instanceof Error
+									? error.message
+									: String(error)
+							}`
+						);
+					} finally {
+						button.setDisabled(false);
+						button.setButtonText("Download Both");
+					}
+				})
+		);
+
+	// 加载本地文件按钮
+	new Setting(containerEl)
+		.setName("Load from Local Files")
+		.setDesc("Load WASM files from your computer")
+		.addButton((button) =>
+			button.setButtonText("Load Compiler").onClick(() => {
+				const input = document.createElement("input");
+				input.type = "file";
+				input.accept = ".wasm";
+				input.onchange = async () => {
+					const file = input.files?.[0];
+					if (!file) {
+						return;
+					}
+
+					try {
+						await loadLocalWasmFile(
+							file,
+							"compiler",
+							WASM_VERSION,
+							storage
+						);
+						new Notice("Compiler WASM loaded successfully");
+						await updateStatus();
+					} catch (error) {
+						new Notice(
+							`Failed to load: ${
+								error instanceof Error
+									? error.message
+									: String(error)
+							}`
+						);
+					}
+				};
+				input.click();
+			})
+		)
+		.addButton((button) =>
+			button.setButtonText("Load Renderer").onClick(() => {
+				const input = document.createElement("input");
+				input.type = "file";
+				input.accept = ".wasm";
+				input.onchange = async () => {
+					const file = input.files?.[0];
+					if (!file) {
+						return;
+					}
+
+					try {
+						await loadLocalWasmFile(
+							file,
+							"renderer",
+							WASM_VERSION,
+							storage
+						);
+						new Notice("Renderer WASM loaded successfully");
+						await updateStatus();
+					} catch (error) {
+						new Notice(
+							`Failed to load: ${
+								error instanceof Error
+									? error.message
+									: String(error)
+							}`
+						);
+					}
+				};
+				input.click();
+			})
+		);
+
+	// 清除缓存按钮
+	new Setting(containerEl)
+		.setName("Clear WASM Cache")
+		.setDesc("Remove all cached WASM files from IndexedDB")
+		.addButton((button) =>
+			button
+				.setButtonText("Clear All")
+				.setWarning()
+				.onClick(async () => {
+					try {
+						await storage.clearAll();
+						new Notice("WASM cache cleared");
+						await updateStatus();
+					} catch (error) {
+						new Notice(
+							`Failed to clear cache: ${
+								error instanceof Error
+									? error.message
+									: String(error)
+							}`
+						);
+					}
+				})
+		);
 }

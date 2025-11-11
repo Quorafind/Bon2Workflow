@@ -15,7 +15,7 @@ export class BonWorkflowSettingTab extends PluginSettingTab {
 
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Bon Workflow Settings" });
+		new Setting(containerEl).setHeading().setName("Bon workflow");
 
 		new Setting(containerEl)
 			.setName("Enable Count")
@@ -26,7 +26,7 @@ export class BonWorkflowSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.enableCount = value;
 						await this.plugin.saveSettings();
-						
+
 						// Apply changes immediately
 						if (value) {
 							this.plugin.loadStatusBar();
@@ -36,6 +36,6 @@ export class BonWorkflowSettingTab extends PluginSettingTab {
 					})
 			);
 
-		renderTypstSettings(containerEl, this.plugin);
+		renderTypstSettings(containerEl, this.plugin, this);
 	}
 }

@@ -26,7 +26,7 @@ function transform(content) {
 	result = result.replace(/\\[\\[([^\\]|]+)\\|([^\\]]+)\\]\\]/g, "$2");  // [[link|text]] -> text
 	result = result.replace(/\\[\\[([^\\]]+)\\]\\]/g, "$1");  // [[link]] -> link
 
-	// 2.4 处理高亮 ==文本== -> #highlight[文本]
+	// 2.4 处理高亮 ==文本== -> Typst 内置 highlight 函数
 	result = result.replace(/==([^=]+)==/g, "#highlight[$1]");
 
 	// 2.5 处理任务列表
@@ -59,13 +59,13 @@ function transform(content) {
 
 	// ========== 阶段 3: 标准 Markdown -> Typst 转换 ==========
 
-	// 3.1 标题转换 (# -> #heading[])
-	result = result.replace(/^######\\s+(.+)$/gm, '#heading(level: 6)[$1]');
-	result = result.replace(/^#####\\s+(.+)$/gm, '#heading(level: 5)[$1]');
-	result = result.replace(/^####\\s+(.+)$/gm, '#heading(level: 4)[$1]');
-	result = result.replace(/^###\\s+(.+)$/gm, '#heading(level: 3)[$1]');
-	result = result.replace(/^##\\s+(.+)$/gm, '#heading(level: 2)[$1]');
-	result = result.replace(/^#\\s+(.+)$/gm, '#heading(level: 1)[$1]');
+	// 3.1 标题转换 (# -> = Heading)
+	result = result.replace(/^######\\s+(.+)$/gm, '====== $1');
+	result = result.replace(/^#####\\s+(.+)$/gm, '===== $1');
+	result = result.replace(/^####\\s+(.+)$/gm, '==== $1');
+	result = result.replace(/^###\\s+(.+)$/gm, '=== $1');
+	result = result.replace(/^##\\s+(.+)$/gm, '== $1');
+	result = result.replace(/^#\\s+(.+)$/gm, '= $1');
 
 	// 3.2 粗体 (**text** -> *text*)
 	result = result.replace(/\\*\\*(.+?)\\*\\*/g, "*$1*");

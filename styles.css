@@ -167,6 +167,61 @@ table.subscription-tracker-table {
 }
 
 .bonbon-status-bar-item.is-active > svg {
-	fill: hsl(var(--accent-h),var(--accent-s),var(--accent-l), 0.5);
+	fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l), 0.5);
 	transition: fill 0.2s ease-in-out;
+}
+
+/* Typst Code Block Rendering Styles */
+.typst-render-container {
+	margin: 1em 0;
+	padding: 0.5em;
+	border-radius: 4px;
+	/* background: var(--background-secondary); */
+	overflow-x: auto;
+	height: fit-content;
+}
+
+.typst-render-container svg {
+	max-width: 100%;
+	height: auto;
+	display: block;
+	margin: 0 auto;
+	scale: 2;
+}
+
+.typst-loading {
+	text-align: center;
+	padding: 2em 1em;
+	color: var(--text-muted);
+	font-size: 0.9em;
+	font-style: italic;
+}
+
+/* Typst Compilation Error Styles */
+.typst-error {
+	padding: 1em;
+	margin: 1em 0;
+	border-left: 4px solid var(--text-error);
+	background: var(--background-secondary);
+	border-radius: 4px;
+}
+
+.typst-error-title {
+	font-weight: bold;
+	color: var(--text-error);
+	margin-bottom: 0.5em;
+	font-size: 1em;
+}
+
+.typst-error-message {
+	font-family: var(--font-monospace);
+	font-size: 0.85em;
+	color: var(--text-muted);
+	overflow-x: auto;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	background: var(--background-primary);
+	padding: 0.5em;
+	border-radius: 3px;
+	margin: 0;
 }

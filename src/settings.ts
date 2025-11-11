@@ -6,7 +6,7 @@ export interface BonbonSettings {
 		[key: string]: number;
 	};
 	enableCount: boolean;
-	typst?: TypstSettings;
+	typst: TypstSettings;
 }
 
 export const BONBON_SETTINGS: BonbonSettings = {
