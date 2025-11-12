@@ -3,6 +3,7 @@ import {
 	CachedMetadata,
 	FileSystemAdapter,
 	Notice,
+	Platform,
 	TFile,
 } from "obsidian";
 import { exec } from "child_process";
@@ -10,6 +11,8 @@ import { TypstSettings } from "./typstSettings";
 import { TypstScriptManager } from "./typstScriptManager";
 import { executeSandbox } from "./typstSandbox";
 import { markdownToTypst, type EmbedEnvironment } from "./transformer";
+import { TypstPathResolver } from "./typstPathResolver";
+import { TypstNotFoundError, TypstInvalidPathError } from "./typstErrors";
 
 interface ConvertOptions {
 	silent?: boolean;
@@ -30,23 +33,25 @@ export interface MarkdownConvertOptions {
  */
 export type PreviewUpdateCallback = (
 	file: TFile,
-	typstCode: string
+	typstCode: string,
 ) => Promise<void>;
 
 export class TypstConverter {
 	private readonly triggerTagSet: Set<string>;
 	private previewUpdateCallback: PreviewUpdateCallback | null = null;
+	private readonly pathResolver: TypstPathResolver;
 
 	constructor(
 		private app: App,
 		private settings: TypstSettings,
-		private scriptManager: TypstScriptManager
+		private scriptManager: TypstScriptManager,
 	) {
 		this.triggerTagSet = new Set(
 			(this.settings.triggerTags ?? ["bon-typst"]).map((tag) =>
-				tag.toLowerCase()
-			)
+				tag.toLowerCase(),
+			),
 		);
+		this.pathResolver = new TypstPathResolver();
 	}
 
 	/**
@@ -90,7 +95,7 @@ export class TypstConverter {
 	async convertFile(
 		file: TFile,
 		metadata?: CachedMetadata | null,
-		options: ConvertOptions = {}
+		options: ConvertOptions = {},
 	): Promise<void> {
 		const cache = metadata ?? this.app.metadataCache.getFileCache(file);
 
@@ -127,7 +132,8 @@ export class TypstConverter {
 
 			// Auto-compile (if enabled)
 			if (this.settings.autoCompile) {
-				const format = this.settings.compileFormat ?? "pdf";
+				const format =
+					options?.format ?? this.settings.compileFormat ?? "pdf";
 				await this.compileTypstFile(typstPath, format, options.silent);
 			}
 		} catch (error) {
@@ -148,7 +154,7 @@ export class TypstConverter {
 	 */
 	public async convertMarkdown(
 		markdown: string,
-		options: MarkdownConvertOptions = {}
+		options: MarkdownConvertOptions = {},
 	): Promise<string> {
 		const {
 			transformMode = this.settings.transformMode,
@@ -163,7 +169,7 @@ export class TypstConverter {
 			// Create and inject AST conversion function into the sandbox
 			const convertFn = this.createAstConverter(
 				currentFile ?? "",
-				maxEmbedDepth
+				maxEmbedDepth,
 			);
 
 			// Pass the conversion function into the sandbox
@@ -180,7 +186,7 @@ export class TypstConverter {
 				{
 					maxEmbedDepth,
 				},
-				embedEnvironment
+				embedEnvironment,
 			);
 		}
 	}
@@ -188,7 +194,7 @@ export class TypstConverter {
 	private async runWithScriptEngine(
 		file: TFile,
 		metadata: CachedMetadata | null,
-		markdown: string
+		markdown: string,
 	): Promise<string> {
 		const scriptName = this.selectScript(file, metadata);
 		const scriptCode = await this.scriptManager.loadScript(scriptName);
@@ -201,7 +207,7 @@ export class TypstConverter {
 
 	private async runWithAstTransformer(
 		file: TFile,
-		markdown: string
+		markdown: string,
 	): Promise<string> {
 		const embedEnvironment: EmbedEnvironment = {
 			app: this.app,
@@ -213,7 +219,7 @@ export class TypstConverter {
 			{
 				maxEmbedDepth: this.settings.maxEmbedDepth,
 			},
-			embedEnvironment
+			embedEnvironment,
 		);
 	}
 
@@ -227,13 +233,41 @@ export class TypstConverter {
 	async compileTypstFile(
 		typstPath: string,
 		format: "pdf" | "png" | "svg" = "pdf",
-		silent = false
+		silent = false,
 	): Promise<string> {
+		// Early check: CLI compilation only available on desktop
+		if (!Platform.isDesktopApp) {
+			const errorMsg =
+				"CLI compilation is only available on desktop. Use WASM preview on mobile.";
+			if (!silent) {
+				new Notice(errorMsg);
+			}
+			throw new Error(errorMsg);
+		}
+
 		const adapter = this.app.vault.adapter;
 		if (!(adapter instanceof FileSystemAdapter)) {
 			throw new Error(
-				"The current storage adapter does not support automatic Typst compilation"
+				"The current storage adapter does not support automatic Typst compilation",
 			);
+		}
+
+		// Resolve Typst CLI path
+		let typstCliPath: string;
+		try {
+			typstCliPath = await this.pathResolver.resolveTypstPath(
+				this.settings.typstCliPath,
+			);
+		} catch (error) {
+			if (error instanceof TypstNotFoundError) {
+				new Notice(error.toUserMessage());
+				throw error;
+			}
+			if (error instanceof TypstInvalidPathError) {
+				new Notice(error.toUserMessage());
+				throw error;
+			}
+			throw error;
 		}
 
 		const fullPath = adapter.getFullPath(typstPath);
@@ -244,15 +278,14 @@ export class TypstConverter {
 		let outputPath: string;
 		let fullOutputPath: string;
 
-		if (format === "png") {
+		if (format === "png" || format === "svg") {
 			// PNG: create folder and generate folder/{n}.png
 			const basePath = typstPath.replace(/\.typ$/, "");
 			const folderPath = `${basePath}-pages`;
 
 			// Ensure folder existence
-			const folderExists = await this.app.vault.adapter.exists(
-				folderPath
-			);
+			const folderExists =
+				await this.app.vault.adapter.exists(folderPath);
 			if (!folderExists) {
 				await this.app.vault.createFolder(folderPath);
 			}
@@ -265,8 +298,8 @@ export class TypstConverter {
 		}
 
 		await new Promise<void>((resolve, reject) => {
-			// Add --root argument to allow access to all files in the vault
-			const command = `typst compile --root "${vaultRoot}" --format ${format} "${fullPath}" "${fullOutputPath}"`;
+			// Use resolved path with proper quoting
+			const command = `"${typstCliPath}" compile --root "${vaultRoot}" --format ${format} "${fullPath}" "${fullOutputPath}"`;
 			exec(command, (error, stdout, stderr) => {
 				if (error) {
 					const message = stderr || stdout || error.message;
@@ -299,7 +332,7 @@ export class TypstConverter {
 	 */
 	private createAstConverter(
 		currentFile: string,
-		maxEmbedDepth: number = this.settings.maxEmbedDepth
+		maxEmbedDepth: number = this.settings.maxEmbedDepth,
 	): (md: string) => Promise<string> {
 		return async (md: string): Promise<string> => {
 			const embedEnvironment: EmbedEnvironment = {
@@ -353,5 +386,19 @@ export class TypstConverter {
 		} else {
 			await this.app.vault.create(path, content);
 		}
+	}
+
+	/**
+	 * Get path resolver (for settings UI)
+	 */
+	getPathResolver(): TypstPathResolver {
+		return this.pathResolver;
+	}
+
+	/**
+	 * Get settings (for internal use)
+	 */
+	getSettings(): TypstSettings {
+		return this.settings;
 	}
 }

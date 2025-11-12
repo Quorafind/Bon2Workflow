@@ -6,6 +6,7 @@
 import {
 	ItemView,
 	Notice,
+	Platform,
 	TFile,
 	WorkspaceLeaf,
 	FileSystemAdapter,
@@ -13,6 +14,8 @@ import {
 import type { TypstWasmRenderer } from "./typstWasmRenderer";
 import type { TypstConverter } from "./typstConverter";
 import { exec } from "child_process";
+import { TypstPathResolver } from "./typstPathResolver";
+import { TypstNotFoundError, TypstInvalidPathError } from "./typstErrors";
 export const TYPST_PREVIEW_VIEW_TYPE = "typst-preview-view";
 
 export class TypstPreviewView extends ItemView {
@@ -20,6 +23,7 @@ export class TypstPreviewView extends ItemView {
 	private converter: TypstConverter;
 	private sourceFile: TFile | null = null;
 	private currentSvg: string = "";
+	private readonly pathResolver: TypstPathResolver;
 
 	// UI containers
 	private previewContainer: HTMLElement;
@@ -32,6 +36,7 @@ export class TypstPreviewView extends ItemView {
 		super(leaf);
 		this.renderer = renderer;
 		this.converter = converter;
+		this.pathResolver = new TypstPathResolver();
 	}
 
 	getViewType(): string {
@@ -499,9 +504,33 @@ export class TypstPreviewView extends ItemView {
 		outputPath: string,
 		format: "pdf" | "png"
 	): Promise<void> {
+		// Early check: CLI compilation only available on desktop
+		if (!Platform.isDesktopApp) {
+			throw new Error(
+				"CLI compilation is only available on desktop. Use WASM preview on mobile."
+			);
+		}
+
 		const adapter = this.app.vault.adapter;
 		if (!(adapter instanceof FileSystemAdapter)) {
 			throw new Error("File system adapter not available");
+		}
+
+		// Resolve Typst CLI path
+		let typstCliPath: string;
+		try {
+			const settings = this.converter.getSettings();
+			typstCliPath = await this.pathResolver.resolveTypstPath(
+				settings.typstCliPath
+			);
+		} catch (error) {
+			if (error instanceof TypstNotFoundError) {
+				throw new Error(error.toUserMessage());
+			}
+			if (error instanceof TypstInvalidPathError) {
+				throw new Error(error.toUserMessage());
+			}
+			throw error;
 		}
 
 		const fullTypstPath = adapter.getFullPath(typstPath);
@@ -526,8 +555,8 @@ export class TypstPreviewView extends ItemView {
 		const fullOutputPath = adapter.getFullPath(finalOutputPath);
 
 		await new Promise<void>((resolve, reject) => {
-			// Use --root to allow access to all vault files
-			const command = `typst compile --root "${vaultRoot}" "${fullTypstPath}" "${fullOutputPath}"`;
+			// Use resolved path with proper quoting
+			const command = `"${typstCliPath}" compile --root "${vaultRoot}" "${fullTypstPath}" "${fullOutputPath}"`;
 
 			exec(command, (error: any, stdout: string, stderr: string) => {
 				if (error) {

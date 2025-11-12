@@ -17,6 +17,11 @@ export interface TypstSettings {
 	previewMode: TypstPreviewMode;
 	// CLI compilation output format
 	compileFormat: TypstCompileFormat;
+	/**
+	 * Custom Typst CLI executable path (optional)
+	 * If not set, will auto-detect typst in system PATH or common installation paths
+	 */
+	typstCliPath?: string;
 }
 
 export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
@@ -31,4 +36,5 @@ export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
 	codeBlockCacheSize: 100,
 	previewMode: "compile", // Default to CLI per file
 	compileFormat: "svg", // Default output is SVG (can be displayed in preview view)
+	typstCliPath: undefined, // Auto-detect by default
 };

@@ -3,6 +3,7 @@ import {
 	DropdownComponent,
 	Modal,
 	Notice,
+	Platform,
 	Setting,
 	TextAreaComponent,
 	TextComponent,
@@ -24,22 +25,29 @@ import {
 } from "./typstWasmStorage";
 
 /**
- * Check if Typst CLI is installed and get version
+ * Check if Typst CLI is installed and get version using path resolver
  */
-async function detectTypstCLI(): Promise<{
+async function detectTypstCLI(
+	resolver: import("./typstPathResolver").TypstPathResolver,
+	customPath?: string,
+): Promise<{
 	installed: boolean;
+	path?: string;
 	version?: string;
+	method?: string;
 	error?: string;
 }> {
 	try {
-		// Use require to import Node.js modules in Obsidian environment
-		const { exec } = require("child_process");
-		const { promisify } = require("util");
-		const execAsync = promisify(exec);
-
-		const { stdout } = await execAsync("typst --version");
-		const version = stdout.trim();
-		return { installed: true, version };
+		const result = await resolver.getDetectionResult(customPath);
+		if (result) {
+			return {
+				installed: true,
+				path: result.path,
+				version: result.version,
+				method: result.method,
+			};
+		}
+		return { installed: false };
 	} catch (error) {
 		return {
 			installed: false,
@@ -169,6 +177,8 @@ export function renderTypstSettings(
 ) {
 	const typstSettings = plugin.settings.typst as TypstSettings | undefined;
 	const manager = plugin.getTypstScriptManager();
+	const converter = plugin.getTypstConverter();
+	const resolver = converter?.getPathResolver();
 
 	const section = containerEl.createDiv({ cls: "typst-settings" });
 
@@ -296,25 +306,132 @@ export function renderTypstSettings(
 				})
 		);
 
-	// CLI 状态检测
-	new Setting(section).setHeading().setName("Typst CLI");
-	const cliStatusSetting = new Setting(section)
-		.setName("CLI status")
-		.setDesc("Checking Typst CLI installation...");
+	// CLI 状态检测 - Only show on desktop
+	if (Platform.isDesktopApp) {
+		new Setting(section).setHeading().setName("Typst CLI");
+		const cliStatusSetting = new Setting(section)
+			.setName("CLI status")
+			.setDesc("Checking Typst CLI installation...");
 
-	// 异步检测 CLI 状态
-	void (async () => {
-		const cliInfo = await detectTypstCLI();
-		if (cliInfo.installed) {
-			cliStatusSetting.setDesc(
-				`✅ Typst CLI detected: ${cliInfo.version || "unknown version"}`
+		// 异步检测 CLI 状态
+		void (async () => {
+			if (!resolver) {
+				cliStatusSetting.setDesc("⚠️ Typst features not initialized");
+				return;
+			}
+
+			const cliInfo = await detectTypstCLI(
+				resolver,
+				typstSettings.typstCliPath,
 			);
-		} else {
-			cliStatusSetting.setDesc(
-				"⚠️ Typst CLI not found. To use CLI compilation features, please install Typst CLI from https://github.com/typst/typst/releases"
+
+			if (cliInfo.installed) {
+				const methodLabel =
+					{
+						custom: "Custom Path",
+						system: "System PATH",
+						detected: "Auto-detected",
+					}[cliInfo.method || "unknown"] || "Unknown";
+
+				cliStatusSetting.setDesc(
+					`✅ ${methodLabel}: ${cliInfo.path}\n📦 Version: ${cliInfo.version || "unknown"}`,
+				);
+			} else {
+				// Platform-specific error messages
+				let errorMessage =
+					"⚠️ Typst CLI not found. Install Typst or set custom path below.";
+
+				if (Platform.isMacOS) {
+					errorMessage +=
+						"\n💡 Mac detected: If installed via Homebrew, auto-detection should work.";
+					errorMessage += "\n📦 Install: brew install typst";
+				} else if (Platform.isWin) {
+					errorMessage +=
+						"\n💡 Windows detected: Install via Cargo or download binary.";
+					errorMessage += "\n📦 Install: cargo install typst-cli";
+				} else if (Platform.isLinux) {
+					errorMessage +=
+						"\n💡 Linux detected: Install via package manager or Cargo.";
+					errorMessage += "\n📦 Install: cargo install typst-cli";
+				}
+
+				errorMessage +=
+					"\n📥 Download: https://github.com/typst/typst/releases";
+
+				cliStatusSetting.setDesc(errorMessage);
+			}
+		})();
+
+		// 自定义 Typst CLI 路径配置 - Platform-aware examples
+		const getPathExamples = (): string => {
+			if (Platform.isMacOS) {
+				return "Examples (Mac): /opt/homebrew/bin/typst, ~/.cargo/bin/typst";
+			} else if (Platform.isWin) {
+				return "Examples (Windows): C:\\Program Files\\Typst\\typst.exe";
+			} else if (Platform.isLinux) {
+				return "Examples (Linux): /usr/local/bin/typst, ~/.cargo/bin/typst";
+			}
+			return "Example: /path/to/typst";
+		};
+
+		new Setting(section)
+			.setName("Custom Typst CLI path (optional)")
+			.setDesc(
+				"Override auto-detection by specifying full path to typst executable.\n" +
+					getPathExamples(),
+			)
+			.addText((text) => {
+				text.setPlaceholder("Leave empty for auto-detection")
+					.setValue(typstSettings.typstCliPath ?? "")
+					.onChange(async (value) => {
+						const trimmed = value.trim();
+						typstSettings.typstCliPath = trimmed || undefined;
+						await plugin.saveSettings();
+
+						// Clear cache to trigger re-detection
+						if (resolver) {
+							resolver.clearCache();
+						}
+					});
+			})
+			.addButton((btn) => {
+				btn.setButtonText("Test")
+					.setTooltip("Test if the specified path is valid")
+					.onClick(async () => {
+						if (!resolver) {
+							new Notice("Typst features not initialized");
+							return;
+						}
+
+						const testPath = typstSettings.typstCliPath;
+						if (!testPath) {
+							new Notice("Please enter a path to test");
+							return;
+						}
+
+						const result = await detectTypstCLI(resolver, testPath);
+						if (result.installed) {
+							new Notice(
+								`✅ Valid Typst CLI\nPath: ${result.path}\nVersion: ${result.version}`,
+							);
+						} else {
+							new Notice(
+								`❌ Invalid path: ${testPath}\n${result.error || "Command not found"}`,
+							);
+						}
+					});
+			});
+	} else {
+		// Mobile: Show info message instead of CLI settings
+		new Setting(section).setHeading().setName("Typst CLI");
+		new Setting(section)
+			.setName("CLI compilation not available")
+			.setDesc(
+				"📱 CLI compilation is only available on desktop.\n" +
+					"💡 On mobile, use WASM preview mode for real-time rendering.\n" +
+					"ℹ️ WASM mode doesn't support external packages but works offline.",
 			);
-		}
-	})();
+	}
 
 	// 预览模式设置
 	new Setting(section)
