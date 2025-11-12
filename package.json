@@ -1,6 +1,6 @@
 {
 	"name": "bon2-workflow",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "A workflow plugin for Obsidian, based on Boninall's workflow.",
 	"main": "main.js",
 	"type": "module",

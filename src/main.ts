@@ -442,6 +442,10 @@ export default class BonWorkflow extends Plugin {
 		return this.typstWasmRenderer;
 	}
 
+	public getTypstConverter(): TypstConverter | null {
+		return this.typstConverter;
+	}
+
 	private triggerDebounce = debounce(
 		async (file: TFile, data: string, cache: CachedMetadata) => {
 			const taskItems = await handleTaskChanges(this.app, file, cache);
