@@ -48,7 +48,7 @@ export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
 	enableCodeBlock: true,
 	codeBlockCacheSize: 100,
 	previewMode: "compile", // Default to CLI per file
-	compileFormat: "svg", // Default output is SVG (can be displayed in preview view)
+	compileFormat: "pdf", // Default output is PDF (can be displayed in preview view)
 	typstCliPath: undefined, // Auto-detect by default
 	enableCheckboxEnhancement: true, // Enable by default for full feature support
 	defaultScriptName: "default", // Use default template script by default
