@@ -2,16 +2,35 @@ import { describe, expect, it } from "vitest";
 import { markdownToTypst } from "../index";
 
 describe("Checkbox Extended Support (Cheq)", () => {
-	it("should import cheq package when checkboxes are present", async () => {
+	it("should import cheq package when checkboxes are present and enhancement enabled", async () => {
 		const markdown = `
 - [ ] Task 1
 - [x] Task 2
 		`;
 
-		const result = await markdownToTypst(markdown);
+		const result = await markdownToTypst(markdown, {
+			enableCheckboxEnhancement: true,
+		});
 
 		expect(result).toContain('#import "@preview/cheq:0.3.0": checklist');
 		expect(result).toContain('#show: checklist.with(extras: true)');
+	});
+
+	it("should NOT import cheq package when enhancement is disabled", async () => {
+		const markdown = `
+- [ ] Task 1
+- [x] Task 2
+		`;
+
+		const result = await markdownToTypst(markdown, {
+			enableCheckboxEnhancement: false,
+		});
+
+		expect(result).not.toContain('#import "@preview/cheq:0.3.0"');
+		expect(result).not.toContain('checklist');
+		// But should still contain checkbox markers
+		expect(result).toContain('[ ]');
+		expect(result).toContain('[x]');
 	});
 
 	it("should NOT import cheq when no checkboxes present", async () => {

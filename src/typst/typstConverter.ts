@@ -185,6 +185,7 @@ export class TypstConverter {
 				markdown,
 				{
 					maxEmbedDepth,
+					enableCheckboxEnhancement: this.settings.enableCheckboxEnhancement ?? true,
 				},
 				embedEnvironment,
 			);
@@ -218,6 +219,7 @@ export class TypstConverter {
 			markdown,
 			{
 				maxEmbedDepth: this.settings.maxEmbedDepth,
+				enableCheckboxEnhancement: this.settings.enableCheckboxEnhancement ?? true,
 			},
 			embedEnvironment,
 		);
@@ -340,7 +342,14 @@ export class TypstConverter {
 				vault: this.app.vault,
 				currentFile,
 			};
-			return markdownToTypst(md, { maxEmbedDepth }, embedEnvironment);
+			return markdownToTypst(
+				md,
+				{
+					maxEmbedDepth,
+					enableCheckboxEnhancement: this.settings.enableCheckboxEnhancement ?? true,
+				},
+				embedEnvironment
+			);
 		};
 	}
 

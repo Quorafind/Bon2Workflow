@@ -9,7 +9,9 @@ import type {
 import type { GeneratorContext } from "../types";
 import type { RenderChildren } from "./types";
 
-const ESCAPE_PATTERN = /([#\[\]\\])/g;
+// 在正则表达式字符类中，] 需要放在开头或者转义
+// 这里使用 [\]...] 的形式，] 在开头紧跟左括号
+const ESCAPE_PATTERN = /([\]#\[\\<>])/g;
 
 // Cheq 支持的 checkbox 符号（24+ 种）
 // 基础符号：' ', 'x', '/', '-'

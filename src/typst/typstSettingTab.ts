@@ -180,6 +180,15 @@ export function renderTypstSettings(
 	const converter = plugin.getTypstConverter();
 	const resolver = converter?.getPathResolver();
 
+	// 验证格式兼容性：WASM 模式下只能使用 SVG
+	if (typstSettings.previewMode === "wasm" && typstSettings.compileFormat !== "svg") {
+		typstSettings.compileFormat = "svg";
+		void plugin.saveSettings(); // 静默保存
+		console.log(
+			"[Typst Settings] Auto-corrected compile format to SVG for WASM mode"
+		);
+	}
+
 	const section = containerEl.createDiv({ cls: "typst-settings" });
 
 	new Setting(section)
@@ -284,6 +293,27 @@ export function renderTypstSettings(
 					await plugin.saveSettings();
 				});
 		});
+
+	new Setting(section)
+		.setName("Enhanced checkbox support")
+		.setDesc(
+			"Enable 24+ checkbox styles with @preview/cheq package.\n" +
+			"⚠️ When enabled: Requires CLI compilation (slower, full features).\n" +
+			"When disabled: Uses basic GFM checkboxes (WASM compatible, faster)."
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(typstSettings.enableCheckboxEnhancement ?? true)
+				.onChange(async (value) => {
+					typstSettings.enableCheckboxEnhancement = value;
+					await plugin.saveSettings();
+					new Notice(
+						value
+							? "Enhanced checkbox enabled. Using CLI for full features."
+							: "Enhanced checkbox disabled. Using WASM for faster rendering."
+					);
+				})
+		);
 
 	// 代码块渲染设置
 	new Setting(section).setHeading().setName("Code block rendering");
@@ -446,24 +476,48 @@ export function renderTypstSettings(
 			dropdown
 				.setValue(typstSettings.previewMode ?? "compile")
 				.onChange(async (value) => {
+					const oldMode = typstSettings.previewMode;
 					typstSettings.previewMode = value as TypstPreviewMode;
+
+					// WASM 模式下自动切换到 SVG 格式
+					if (value === "wasm" && typstSettings.compileFormat !== "svg") {
+						typstSettings.compileFormat = "svg";
+						new Notice(
+							`Preview mode set to: ${value}\nCompile format auto-switched to SVG (WASM only supports SVG)`
+						);
+					} else {
+						new Notice(`Preview mode set to: ${value}`);
+					}
+
 					await plugin.saveSettings();
-					new Notice(`Preview mode set to: ${value}`);
+					// 刷新设置页面以更新格式选项的可用状态
+					settingTab.display();
 				});
 		});
 
-	// CLI 编译输出格式
+	// 编译输出格式
+	const isWasmMode = typstSettings.previewMode === "wasm";
 	new Setting(section)
-		.setName("CLI compile format")
+		.setName("Compile format")
 		.setDesc(
-			"Output format when using CLI compilation. SVG: Vector (best for preview). PNG: Raster image. PDF: Document."
+			isWasmMode
+				? "⚠️ WASM mode only supports SVG output. Switch to CLI mode for PDF/PNG."
+				: "Output format when using CLI compilation. SVG: Vector (best for preview). PNG: Raster image. PDF: Document."
 		)
 		.addDropdown((dropdown) => {
-			dropdown.addOption("svg", "SVG (Vector)");
-			dropdown.addOption("png", "PNG (Image)");
-			dropdown.addOption("pdf", "PDF (Document)");
+			// WASM 模式下只显示 SVG 选项
+			if (isWasmMode) {
+				dropdown.addOption("svg", "SVG (Vector) - WASM Only");
+			} else {
+				// CLI 模式下显示所有选项
+				dropdown.addOption("svg", "SVG (Vector)");
+				dropdown.addOption("png", "PNG (Image)");
+				dropdown.addOption("pdf", "PDF (Document)");
+			}
+
 			dropdown
 				.setValue(typstSettings.compileFormat ?? "svg")
+				.setDisabled(isWasmMode) // WASM 模式下禁用选择
 				.onChange(async (value) => {
 					typstSettings.compileFormat = value as TypstCompileFormat;
 					await plugin.saveSettings();

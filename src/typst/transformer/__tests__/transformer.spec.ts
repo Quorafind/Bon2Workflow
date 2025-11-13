@@ -84,3 +84,68 @@ describe("markdownToTypst embeds", () => {
 		);
 	});
 });
+
+describe("markdownToTypst special character escaping", () => {
+	it("escapes < and > characters in text", async () => {
+		const env = createEmbedEnvironment({});
+
+		const result = await markdownToTypst(
+			"Temperature range: 960~1060℃, Formula: 0<x<0.1 and y>5",
+			{},
+			env
+		);
+
+		// < and > should be escaped in text to avoid Typst label parsing errors
+		expect(result).toContain("\\<");
+		expect(result).toContain("\\>");
+	});
+
+	it("does not escape < > in heading labels", async () => {
+		const env = createEmbedEnvironment({});
+
+		const result = await markdownToTypst(
+			"# Heading with special chars: x<y",
+			{},
+			env
+		);
+
+		// Heading should have a label like <heading-with-special-chars-x-y>
+		// The label delimiters < > should NOT be escaped
+		expect(result).toMatch(/= .*<[\w-]+>/);
+		// But the < in the heading content should be escaped
+		expect(result).toContain("\\<");
+	});
+
+	it("escapes other special characters", async () => {
+		const env = createEmbedEnvironment({});
+
+		// 使用 [link] 这样的非 checkbox 模式来测试方括号转义
+		// 注意：单独的 [ ] 会被识别为 checkbox 标记而被保护
+		const result = await markdownToTypst(
+			"Special chars: # [link text] and \\backslash",
+			{},
+			env
+		);
+
+		expect(result).toContain("\\#");
+		// [link text] 中的方括号应该被转义
+		expect(result).toContain("\\[");
+		expect(result).toContain("\\]");
+		expect(result).toContain("\\\\");
+	});
+
+	it("preserves checkbox markers without escaping brackets", async () => {
+		const env = createEmbedEnvironment({});
+
+		const result = await markdownToTypst(
+			"- [ ] Task with [ ] checkbox pattern",
+			{},
+			env
+		);
+
+		// Checkbox patterns should NOT have escaped brackets
+		expect(result).toContain("[ ]");
+		// The checkbox pattern regex should protect these from escaping
+		expect(result).not.toContain("\\[ \\]");
+	});
+});

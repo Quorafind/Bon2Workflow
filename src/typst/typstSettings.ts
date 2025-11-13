@@ -22,6 +22,13 @@ export interface TypstSettings {
 	 * If not set, will auto-detect typst in system PATH or common installation paths
 	 */
 	typstCliPath?: string;
+	/**
+	 * Enable enhanced checkbox support with cheq package
+	 * When enabled: Imports @preview/cheq package for 24+ checkbox styles (requires CLI compilation)
+	 * When disabled: Uses basic GFM checkboxes only (WASM compatible, faster rendering)
+	 * @default true
+	 */
+	enableCheckboxEnhancement: boolean;
 }
 
 export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
@@ -37,4 +44,5 @@ export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
 	previewMode: "compile", // Default to CLI per file
 	compileFormat: "svg", // Default output is SVG (can be displayed in preview view)
 	typstCliPath: undefined, // Auto-detect by default
+	enableCheckboxEnhancement: true, // Enable by default for full feature support
 };

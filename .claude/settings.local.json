@@ -4,7 +4,9 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "mcp__acemcp__search_context",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(npm test:*)",
+      "WebFetch(domain:myriad-dreamin.github.io)"
     ],
     "deny": [],
     "ask": []

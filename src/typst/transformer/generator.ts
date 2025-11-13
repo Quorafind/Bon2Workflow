@@ -100,7 +100,8 @@ export class TypstGenerator {
 		let output = "";
 
 		// 检测是否需要导入 cheq 包（支持扩展 checkbox）
-		if (this.hasCheckboxes(root)) {
+		// 仅在启用增强功能且文档包含 checkbox 时导入
+		if (this.context.options.enableCheckboxEnhancement && this.hasCheckboxes(root)) {
 			output += '#import "@preview/cheq:0.3.0": checklist\n';
 			output += "#show: checklist.with(extras: true)\n\n";
 		}

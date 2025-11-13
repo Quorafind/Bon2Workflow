@@ -15,6 +15,13 @@ export interface TypstTransformOptions {
 	labelPrefix: string;
 	preserveFrontmatter: boolean;
 	maxEmbedDepth: number;
+	/**
+	 * Enable enhanced checkbox support with cheq package
+	 * When true: Generates #import for @preview/cheq (requires CLI compilation)
+	 * When false: Uses basic GFM checkboxes only (WASM compatible)
+	 * @default true
+	 */
+	enableCheckboxEnhancement: boolean;
 	onEmbedDepthExceeded?: (path: string, depth: number) => void;
 	onCircularReference?: (path: string, stack: string[]) => void;
 	onMissingEmbed?: (path: string) => void;

@@ -31,6 +31,7 @@ const DEFAULT_OPTIONS: TypstTransformOptions = {
 	labelPrefix: "",
 	preserveFrontmatter: false,
 	maxEmbedDepth: 5,
+	enableCheckboxEnhancement: true,
 };
 
 const IMAGE_EXTENSIONS = new Set([
