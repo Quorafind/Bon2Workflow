@@ -72,24 +72,26 @@ export class TypstConverter {
 
 	/**
 	 * Select script name to use for transformation
-	 * @returns The script name, or null if not explicitly specified (indicates AST mode should be used)
+	 * Priority: frontmatter > folder mapping > user default script
+	 * @returns The script name (never null - always fallback to defaultScriptName)
 	 */
-	selectScript(file: TFile, metadata: CachedMetadata | null): string | null {
+	selectScript(file: TFile, metadata: CachedMetadata | null): string {
+		// 1. Check frontmatter
 		const frontmatter = metadata?.frontmatter ?? {};
 		const frontmatterScript = frontmatter["typst-script"];
 		if (typeof frontmatterScript === "string" && frontmatterScript.trim()) {
 			return this.normalizeScriptName(frontmatterScript);
 		}
 
+		// 2. Check folder mapping
 		const folderPath = file.parent?.path ?? "";
 		const mapping = this.settings.templateMapping ?? {};
-
 		if (folderPath && mapping[folderPath]) {
 			return this.normalizeScriptName(mapping[folderPath]);
 		}
 
-		// No script explicitly specified, return null (use AST mode)
-		return null;
+		// 3. Use user's default script
+		return this.settings.defaultScriptName || "default";
 	}
 
 	async convertFile(
@@ -102,14 +104,13 @@ export class TypstConverter {
 		try {
 			const markdown = await this.app.vault.read(file);
 
-			// Dynamically determine the transformation mode: use script mode if a script is specified, otherwise use ast mode
+			// Select script (never null - always uses defaultScriptName as fallback)
 			const selectedScript = this.selectScript(file, cache);
-			const effectiveTransformMode =
-				selectedScript !== null ? "script" : "ast";
 
+			// Always use script mode (script will call AST converter internally)
 			const typstContent = await this.convertMarkdown(markdown, {
-				transformMode: effectiveTransformMode,
-				scriptName: selectedScript ?? undefined,
+				transformMode: "script",
+				scriptName: selectedScript,
 				maxEmbedDepth: this.settings.maxEmbedDepth,
 				currentFile: file.path,
 			});
@@ -388,7 +389,12 @@ export class TypstConverter {
 		return file.path.replace(extensionPattern, ".typ");
 	}
 
-	private async writeTypstFile(path: string, content: string): Promise<void> {
+	/**
+	 * Write Typst content to a .typ file
+	 * @param path File path
+	 * @param content Typst content
+	 */
+	async writeTypstFile(path: string, content: string): Promise<void> {
 		const existing = this.app.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFile) {
 			await this.app.vault.modify(existing, content);

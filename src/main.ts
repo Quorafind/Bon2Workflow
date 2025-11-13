@@ -552,17 +552,24 @@ export default class BonWorkflow extends Plugin {
 							format
 						);
 					} else if (mode === "compile" && this.typstConverter) {
-						// CLI mode: Compile file and load result
+						// CLI mode: Write Typst code to file, compile, and load result
 						try {
 							const typstPath = this.buildTypstPath(file);
 							const format =
 								this.settings.typst?.compileFormat ?? "svg";
+
+							// Write Typst code to .typ file first
+							await this.typstConverter.writeTypstFile(typstPath, typstCode);
+
+							// Compile the .typ file
 							const outputPath =
 								await this.typstConverter.compileTypstFile(
 									typstPath,
 									format,
 									true // silent
 								);
+
+							// Load compiled result in preview
 							await view.updatePreviewFromFile(
 								file,
 								outputPath,

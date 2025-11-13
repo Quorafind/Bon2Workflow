@@ -5,13 +5,13 @@ const DEFAULT_SCRIPT_FILENAME = `${DEFAULT_SCRIPT_NAME}.js`;
 const DEFAULT_SCRIPT_CONTENT = `/**
  * Default Script Example: Set Typst Document Template
  *
- * For complex transformation logic, use API calls outside the sandbox.
- * This script demonstrates how to set a basic Typst document template only.
+ * This script uses the built-in AST converter (convertToTypst) to transform
+ * Markdown to Typst, then prepends document template settings.
  *
- * @param {string} content - Document content
+ * @param {string} content - Markdown content
  * @returns {string} - Typst code with template settings applied
  */
-function transform(content) {
+async function transform(content) {
 	// Basic template settings example
 	const template = \`#set page(
   paper: "a4",
@@ -31,8 +31,11 @@ function transform(content) {
 
 \`;
 
-	// Return template + content
-	return template + content;
+	// Convert Markdown to Typst using the built-in AST converter
+	const typstContent = await convertToTypst(content);
+
+	// Return template + converted content
+	return template + typstContent;
 }
 `;
 
@@ -56,17 +59,17 @@ export class TypstScriptManager {
 	}
 
 	/**
-	 * Initialize the default script if it does not exist.
+	 * Initialize the default script (always overwrite with latest template).
+	 * The "default" script is a read-only template and should not be edited by users.
 	 */
 	async initializeDefaultScript(): Promise<void> {
 		await this.ensureScriptDirectory();
 		const defaultPath = this.getScriptPath(DEFAULT_SCRIPT_NAME);
 		const adapter = this.vault.adapter;
 
-		if (!(await adapter.exists(defaultPath))) {
-			await adapter.write(defaultPath, DEFAULT_SCRIPT_CONTENT);
-			this.scriptCache.set(DEFAULT_SCRIPT_NAME, DEFAULT_SCRIPT_CONTENT);
-		}
+		// Always overwrite default.js with the latest template
+		await adapter.write(defaultPath, DEFAULT_SCRIPT_CONTENT);
+		this.scriptCache.set(DEFAULT_SCRIPT_NAME, DEFAULT_SCRIPT_CONTENT);
 	}
 
 	/**
@@ -130,13 +133,22 @@ export class TypstScriptManager {
 	}
 
 	/**
-	 * Delete a script by name. The default script cannot be deleted.
+	 * Delete a script by name.
+	 * @param scriptName Script name to delete
+	 * @param protectedScriptName Optional protected script name (cannot be deleted)
 	 */
-	async deleteScript(scriptName: string): Promise<void> {
+	async deleteScript(scriptName: string, protectedScriptName?: string): Promise<void> {
 		const normalized = this.normalizeScriptName(scriptName);
 		this.validateScriptName(normalized);
+
+		// Cannot delete the default template script
 		if (normalized === DEFAULT_SCRIPT_NAME) {
-			throw new Error("The default script cannot be deleted");
+			throw new Error('The "default" template script cannot be deleted');
+		}
+
+		// Cannot delete the user's default script
+		if (protectedScriptName && normalized === this.normalizeScriptName(protectedScriptName)) {
+			throw new Error(`Cannot delete "${normalized}" as it is set as the default script`);
 		}
 
 		const path = this.getScriptPath(normalized);
@@ -145,6 +157,34 @@ export class TypstScriptManager {
 			await adapter.remove(path);
 		}
 		this.scriptCache.delete(normalized);
+	}
+
+	/**
+	 * Copy a script to a new name.
+	 * @param sourceScriptName Source script name
+	 * @param targetScriptName Target script name
+	 */
+	async copyScript(sourceScriptName: string, targetScriptName: string): Promise<void> {
+		const normalizedSource = this.normalizeScriptName(sourceScriptName);
+		const normalizedTarget = this.normalizeScriptName(targetScriptName);
+
+		this.validateScriptName(normalizedTarget);
+
+		if (normalizedTarget === DEFAULT_SCRIPT_NAME) {
+			throw new Error('Cannot overwrite the "default" template script');
+		}
+
+		// Check if target already exists
+		const targetPath = this.getScriptPath(normalizedTarget);
+		if (await this.vault.adapter.exists(targetPath)) {
+			throw new Error(`Script "${normalizedTarget}" already exists`);
+		}
+
+		// Load source content
+		const sourceContent = await this.loadScript(normalizedSource);
+
+		// Save to target
+		await this.saveScript(normalizedTarget, sourceContent);
 	}
 
 	/**

@@ -29,6 +29,12 @@ export interface TypstSettings {
 	 * @default true
 	 */
 	enableCheckboxEnhancement: boolean;
+	/**
+	 * User's default script name (used when no folder mapping or frontmatter script specified)
+	 * Note: "default" is a special read-only template script
+	 * @default "default"
+	 */
+	defaultScriptName: string;
 }
 
 export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
@@ -45,4 +51,5 @@ export const DEFAULT_TYPST_SETTINGS: TypstSettings = {
 	compileFormat: "svg", // Default output is SVG (can be displayed in preview view)
 	typstCliPath: undefined, // Auto-detect by default
 	enableCheckboxEnhancement: true, // Enable by default for full feature support
+	defaultScriptName: "default", // Use default template script by default
 };

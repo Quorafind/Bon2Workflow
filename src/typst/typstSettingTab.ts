@@ -56,6 +56,61 @@ async function detectTypstCLI(
 	}
 }
 
+interface ScriptNameModalOptions {
+	title: string;
+	placeholder: string;
+	submitText: string;
+	onSubmit: (name: string) => Promise<void>;
+}
+
+class ScriptNameModal extends Modal {
+	constructor(app: App, private readonly options: ScriptNameModalOptions) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		new Setting(contentEl).setHeading().setName(this.options.title);
+
+		let nameInput: TextComponent | null = null;
+		new Setting(contentEl)
+			.setName("New script name")
+			.setDesc("Enter the name only, no .js suffix required")
+			.addText((text) => {
+				nameInput = text;
+				text.setPlaceholder(this.options.placeholder);
+			});
+
+		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+		const cancelButton = buttons.createEl("button", { text: "Cancel" });
+		cancelButton.addEventListener("click", () => this.close());
+
+		const submitButton = buttons.createEl("button", {
+			text: this.options.submitText,
+			cls: "mod-cta",
+		});
+		submitButton.addEventListener("click", async () => {
+			const rawName = nameInput?.getValue() ?? "";
+			const sanitizedName = rawName.replace(/[\\\/]/g, "").trim();
+			if (!sanitizedName) {
+				new Notice("Script name cannot be empty");
+				return;
+			}
+
+			try {
+				await this.options.onSubmit(sanitizedName);
+				this.close();
+			} catch (error) {
+				const message =
+					error instanceof Error ? error.message : String(error);
+				new Notice(message);
+			}
+		});
+	}
+}
+
 interface ScriptEditorModalOptions {
 	mode: "create" | "edit";
 	scriptName?: string;
@@ -579,6 +634,33 @@ export function renderTypstSettings(
 		});
 
 	new Setting(section).setHeading().setName("Script management");
+
+	// Default script selector
+	new Setting(section)
+		.setName("Default script")
+		.setDesc(
+			'Script used when no folder mapping or frontmatter specified. "default" is a read-only template.'
+		)
+		.addDropdown(async (dropdown) => {
+			dropdown.setDisabled(!manager);
+			if (manager) {
+				const scripts = await manager.listScripts();
+				scripts.forEach((name) => {
+					dropdown.addOption(
+						name,
+						name === "default" ? `${name} (template)` : name
+					);
+				});
+				dropdown
+					.setValue(typstSettings.defaultScriptName || "default")
+					.onChange(async (value) => {
+						typstSettings.defaultScriptName = value;
+						await plugin.saveSettings();
+						new Notice(`Default script set to: ${value}`);
+					});
+			}
+		});
+
 	const scriptSetting = new Setting(section)
 		.setName("Script list")
 		.setDesc("Manage Typst transform scripts");
@@ -617,6 +699,50 @@ export function renderTypstSettings(
 							dropdown!,
 							manager
 						);
+						// Refresh settings page to update default script dropdown
+						settingTab.display();
+					},
+				}).open();
+			})
+	);
+
+	scriptSetting.addButton((button) =>
+		button
+			.setButtonText("Copy")
+			.setDisabled(!manager)
+			.onClick(async () => {
+				if (!manager || !dropdown) {
+					return;
+				}
+				const scriptName = dropdown.getValue();
+				if (!scriptName) {
+					new Notice("Please select a script to copy");
+					return;
+				}
+
+				// Prompt for new name
+				new ScriptNameModal(plugin.app, {
+					title: `Copy script "${scriptName}"`,
+					placeholder: "Enter new script name",
+					submitText: "Copy",
+					onSubmit: async (newName) => {
+						try {
+							await manager.copyScript(scriptName, newName);
+							new Notice(`Script copied to: ${newName}`);
+							cachedScripts = await refreshScriptOptions(
+								dropdown!,
+								manager
+							);
+							dropdown.setValue(newName);
+							// Refresh settings page to update default script dropdown
+							settingTab.display();
+						} catch (error) {
+							const message =
+								error instanceof Error
+									? error.message
+									: String(error);
+							new Notice(`Copy failed: ${message}`);
+						}
 					},
 				}).open();
 			})
@@ -635,6 +761,15 @@ export function renderTypstSettings(
 					new Notice("Please select a script to edit");
 					return;
 				}
+
+				// "default" script is read-only
+				if (scriptName === "default") {
+					new Notice(
+						'The "default" template script is read-only. Use Copy to create an editable version.'
+					);
+					return;
+				}
+
 				const content = await manager.loadScript(scriptName);
 				new ScriptEditorModal(plugin.app, {
 					mode: "edit",
@@ -662,7 +797,11 @@ export function renderTypstSettings(
 					return;
 				}
 				try {
-					await manager.deleteScript(scriptName);
+					// Pass the user's default script name for protection
+					await manager.deleteScript(
+						scriptName,
+						typstSettings.defaultScriptName
+					);
 					new Notice(`Script ${scriptName} deleted`);
 					cachedScripts = await refreshScriptOptions(
 						dropdown!,
@@ -671,6 +810,8 @@ export function renderTypstSettings(
 					if (cachedScripts.length === 0) {
 						dropdown.setValue("");
 					}
+					// Refresh the entire settings page to update the default script dropdown
+					settingTab.display();
 				} catch (error) {
 					const message =
 						error instanceof Error ? error.message : String(error);
