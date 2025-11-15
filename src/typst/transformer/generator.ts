@@ -76,6 +76,8 @@ export class TypstGenerator {
 			options,
 			currentDepth: 0,
 			inCodeBlock: false,
+			inListItem: false,
+			listDepth: 0,
 			collectedLabels: new Set(),
 			currentFile,
 		};
@@ -128,7 +130,8 @@ export class TypstGenerator {
 			case "paragraph":
 				return generateParagraph(
 					node as Paragraph,
-					this.renderChildren
+					this.renderChildren,
+					this.context
 				);
 			case "text":
 				return generateText(node as Text, this.context);
@@ -149,7 +152,7 @@ export class TypstGenerator {
 					this.renderChildren
 				);
 			case "list":
-				return generateList(node as List, this.renderChildren);
+				return generateList(node as List, this.renderChildren, this.context);
 			case "table":
 				return generateTable(node as Table, this.renderChildren);
 			case "link":

@@ -6,7 +6,8 @@
       "mcp__acemcp__search_context",
       "Bash(git add:*)",
       "Bash(npm test:*)",
-      "WebFetch(domain:myriad-dreamin.github.io)"
+      "WebFetch(domain:myriad-dreamin.github.io)",
+      "Bash(node -e:*)"
     ],
     "deny": [],
     "ask": []

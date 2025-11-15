@@ -786,7 +786,7 @@ export class TypstConverter {
 		});
 
 		// 显示 Notice，8 秒后自动关闭
-		new Notice(fragment, 0);
+		new Notice(fragment, 8000);
 	}
 
 	/**

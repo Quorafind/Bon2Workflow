@@ -31,6 +31,8 @@ export interface GeneratorContext {
 	options: TypstTransformOptions;
 	currentDepth: number;
 	inCodeBlock: boolean;
+	inListItem: boolean; // 标识当前是否在列表项内部（用于控制段落 parbreak 行为）
+	listDepth: number; // 列表嵌套深度（用于计算嵌套列表的缩进）
 	collectedLabels: Set<string>;
 	currentFile: string; // 当前正在转换的文件路径（用于计算相对路径）
 }

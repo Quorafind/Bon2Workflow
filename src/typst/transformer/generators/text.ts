@@ -60,10 +60,17 @@ export function generateEmphasis(
 
 export function generateParagraph(
 	node: Paragraph,
-	renderChildren: RenderChildren
+	renderChildren: RenderChildren,
+	context: GeneratorContext
 ): string {
 	const children = renderChildren(node.children);
-	// 使用 Typst 的 parbreak() 函数明确段落分隔
+
+	// 列表项内的段落不添加 parbreak，保持列表连续性和层级缩进
+	if (context.inListItem) {
+		return children ? `${children}\n` : "";
+	}
+
+	// 普通段落使用 Typst 的 parbreak() 函数明确段落分隔
 	// 多个连续的 parbreak() 会自动合并为一个
 	return children ? `${children}\n#parbreak()\n` : "#parbreak()\n";
 }
