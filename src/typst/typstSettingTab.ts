@@ -7,6 +7,7 @@ import {
 	Setting,
 	TextAreaComponent,
 	TextComponent,
+	ButtonComponent,
 } from "obsidian";
 import type BonWorkflow from "../main";
 import { DEFAULT_SCRIPT_CONTENT } from "./typstScriptManager";
@@ -29,7 +30,7 @@ import {
  */
 async function detectTypstCLI(
 	resolver: import("./typstPathResolver").TypstPathResolver,
-	customPath?: string,
+	customPath?: string
 ): Promise<{
 	installed: boolean;
 	path?: string;
@@ -116,6 +117,7 @@ interface ScriptEditorModalOptions {
 	scriptName?: string;
 	initialContent: string;
 	onSubmit: (name: string, content: string) => Promise<void>;
+	contentType?: "script" | "template"; // Distinguish between scripts and templates
 }
 
 class ScriptEditorModal extends Modal {
@@ -126,18 +128,24 @@ class ScriptEditorModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
+		contentEl.addClass("typst-script-editor-modal");
 
+		const contentType = this.options.contentType || "script";
+		const displayType = contentType === "template" ? "Template" : "Script";
 		const title =
 			this.options.mode === "create"
-				? "Create Typst Script"
-				: `Edit Script: ${this.options.scriptName}`;
+				? `Create Typst ${displayType}`
+				: `Edit ${displayType}: ${this.options.scriptName}`;
 		new Setting(contentEl).setHeading().setName(title);
 
 		let nameInput: TextComponent | null = null;
 		if (this.options.mode === "create") {
+			const contentType = this.options.contentType || "script";
+			const displayType = contentType === "template" ? "template" : "script";
+			const suffix = contentType === "template" ? ".typ" : ".js";
 			new Setting(contentEl)
-				.setName("Script name")
-				.setDesc("Enter the name only, no .js suffix required")
+				.setName(`${displayType.charAt(0).toUpperCase() + displayType.slice(1)} name`)
+				.setDesc(`Enter the name only, no ${suffix} suffix required`)
 				.addText((text) => {
 					nameInput = text;
 					text.setPlaceholder("report").setValue(
@@ -145,14 +153,17 @@ class ScriptEditorModal extends Modal {
 					);
 				});
 		} else {
+			const contentType = this.options.contentType || "script";
+			const displayType = contentType === "template" ? "template" : "script";
 			contentEl.createEl("p", {
-				text: `Current script: ${this.options.scriptName}`,
+				text: `Current ${displayType}: ${this.options.scriptName}`,
 			});
 		}
 
 		const editor = new TextAreaComponent(contentEl);
 		editor.inputEl.rows = 18;
 		editor.inputEl.spellcheck = false;
+		editor.inputEl.toggleClass("script-editor-modal-textarea", true);
 		editor
 			.setPlaceholder("function transform(content) { return content; }")
 			.setValue(this.options.initialContent);
@@ -171,8 +182,10 @@ class ScriptEditorModal extends Modal {
 					? nameInput?.getValue() ?? ""
 					: this.options.scriptName ?? "";
 			const sanitizedName = rawName.replace(/[\\\/]/g, "").trim();
+			const contentType = this.options.contentType || "script";
+			const displayType = contentType === "template" ? "Template" : "Script";
 			if (!sanitizedName) {
-				new Notice("Script name cannot be empty");
+				new Notice(`${displayType} name cannot be empty`);
 				return;
 			}
 
@@ -185,6 +198,214 @@ class ScriptEditorModal extends Modal {
 				new Notice(message);
 			}
 		});
+	}
+}
+
+/**
+ * Conversion Preview Modal - Shows live preview of template + script transformation
+ */
+class ConversionPreviewModal extends Modal {
+	private markdownInput: TextAreaComponent;
+	private outputArea: TextAreaComponent;
+	private templateDropdown: DropdownComponent;
+	private scriptDropdown: DropdownComponent;
+	private previewButton: ButtonComponent;
+
+	constructor(
+		app: App,
+		private plugin: BonWorkflow,
+		private sampleMarkdown: string = "# Sample Document\n\nThis is a **preview** of how your template and script will transform Markdown to Typst.\n\n## Features\n\n- Bullet points\n- More content\n"
+	) {
+		super(app);
+	}
+
+	async onOpen(): Promise<void> {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.addClass("typst-conversion-preview-modal");
+
+		new Setting(contentEl)
+			.setHeading()
+			.setName("Conversion Preview")
+			.setDesc(
+				"Test how your template and script transform Markdown to Typst"
+			);
+
+		// Input area
+		new Setting(contentEl)
+			.setName("Sample Markdown")
+			.setDesc("Edit this to test different content");
+		this.markdownInput = new TextAreaComponent(contentEl);
+		this.markdownInput.inputEl.rows = 8;
+		this.markdownInput.setValue(this.sampleMarkdown);
+		this.markdownInput.inputEl.toggleClass(
+			"conversion-preview-markdown-textarea",
+			true
+		);
+
+		// Configuration section
+		const configDiv = contentEl.createDiv({
+			cls: "conversion-preview-config",
+		});
+
+		// Template selection
+		const templateSetting = new Setting(configDiv).setName("Template");
+		templateSetting.addDropdown((dropdown) => {
+			this.templateDropdown = dropdown;
+			dropdown.addOption("", "No template");
+		});
+
+		// Script selection
+		const scriptSetting = new Setting(configDiv).setName("Script");
+		scriptSetting.addDropdown((dropdown) => {
+			this.scriptDropdown = dropdown;
+			dropdown.addOption("", "AST only (no script)");
+		});
+
+		// Preview button
+		const buttonSetting = new Setting(configDiv);
+		buttonSetting.addButton((btn) => {
+			this.previewButton = btn;
+			btn.setButtonText("Preview")
+				.setCta()
+				.onClick(async () => {
+					await this.updatePreview();
+				});
+		});
+
+		// Output area (read-only)
+		new Setting(contentEl)
+			.setName("Typst Output")
+			.setDesc("Final Typst code after template + script transformation");
+		this.outputArea = new TextAreaComponent(contentEl);
+		this.outputArea.inputEl.rows = 15;
+		this.outputArea.inputEl.readOnly = true;
+		this.outputArea.inputEl.toggleClass(
+			"conversion-preview-output-textarea",
+			true
+		);
+
+		// Load templates and scripts
+		await this.loadOptions();
+
+		// Initial preview
+		await this.updatePreview();
+	}
+
+	private async loadOptions(): Promise<void> {
+		const converter = this.plugin.getTypstConverter();
+		if (!converter) {
+			return;
+		}
+
+		const templateManager = converter.getTemplateManager();
+		const scriptManager = this.plugin.getTypstScriptManager();
+
+		// Load templates
+		if (templateManager) {
+			try {
+				const templates = await templateManager.listTemplates();
+				const settings = this.plugin.settings.typst;
+
+				// Clear and rebuild template options
+				this.templateDropdown.selectEl.empty();
+				const noTemplateOpt = document.createElement("option");
+				noTemplateOpt.value = "";
+				noTemplateOpt.textContent = "No template";
+				this.templateDropdown.selectEl.appendChild(noTemplateOpt);
+
+				templates.forEach((name) => {
+					const option = document.createElement("option");
+					option.value = name;
+					option.textContent =
+						name === "default" ? `${name} (built-in)` : name;
+					this.templateDropdown.selectEl.appendChild(option);
+				});
+
+				// Set default
+				if (
+					settings.defaultTemplateName &&
+					templates.includes(settings.defaultTemplateName)
+				) {
+					this.templateDropdown.setValue(
+						settings.defaultTemplateName
+					);
+				}
+			} catch (error) {
+				console.error("Failed to load templates:", error);
+			}
+		}
+
+		// Load scripts
+		if (scriptManager) {
+			try {
+				const scripts = await scriptManager.listScripts();
+				const settings = this.plugin.settings.typst;
+
+				// Clear and rebuild script options
+				this.scriptDropdown.selectEl.empty();
+				const astOnlyOpt = document.createElement("option");
+				astOnlyOpt.value = "";
+				astOnlyOpt.textContent = "AST only (no script)";
+				this.scriptDropdown.selectEl.appendChild(astOnlyOpt);
+
+				scripts.forEach((name) => {
+					const option = document.createElement("option");
+					option.value = name;
+					option.textContent =
+						name === "default" ? `${name} (built-in)` : name;
+					this.scriptDropdown.selectEl.appendChild(option);
+				});
+
+				// Set default
+				if (
+					settings.defaultScriptName &&
+					scripts.includes(settings.defaultScriptName)
+				) {
+					this.scriptDropdown.setValue(settings.defaultScriptName);
+				}
+			} catch (error) {
+				console.error("Failed to load scripts:", error);
+			}
+		}
+	}
+
+	private async updatePreview(): Promise<void> {
+		try {
+			this.previewButton.setButtonText("Previewing...");
+			this.previewButton.setDisabled(true);
+
+			const converter = this.plugin.getTypstConverter();
+			if (!converter) {
+				this.outputArea.setValue(
+					"Error: Typst converter not initialized"
+				);
+				return;
+			}
+
+			const markdown = this.markdownInput.getValue();
+			const templateName = this.templateDropdown.getValue() || undefined;
+			const scriptName = this.scriptDropdown.getValue() || "default";
+			const transformMode = this.scriptDropdown.getValue()
+				? "script"
+				: "ast";
+
+			const result = await converter.convertMarkdown(markdown, {
+				transformMode,
+				scriptName,
+				templateName,
+				maxEmbedDepth: 5,
+			});
+
+			this.outputArea.setValue(result);
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : String(error);
+			this.outputArea.setValue(`Error during conversion:\n\n${message}`);
+		} finally {
+			this.previewButton.setButtonText("Preview");
+			this.previewButton.setDisabled(false);
+		}
 	}
 }
 
@@ -225,6 +446,43 @@ async function refreshScriptOptions(
 	return scripts;
 }
 
+async function refreshTemplateOptions(
+	dropdown: DropdownComponent,
+	manager: import("./typstTemplateManager").TypstTemplateManager | null
+): Promise<string[]> {
+	if (!manager) {
+		dropdown.setDisabled(true);
+		return [];
+	}
+
+	const templates = await manager.listTemplates();
+	const selectEl = dropdown.selectEl;
+	while (selectEl.firstChild) {
+		selectEl.removeChild(selectEl.firstChild);
+	}
+
+	if (!templates.length) {
+		const option = document.createElement("option");
+		option.value = "";
+		option.textContent = "No templates available";
+		selectEl.appendChild(option);
+		dropdown.setDisabled(true);
+		return [];
+	}
+
+	templates.forEach((template) => {
+		const option = document.createElement("option");
+		option.value = template;
+		option.textContent = template;
+		selectEl.appendChild(option);
+	});
+	dropdown.setDisabled(false);
+	if (!templates.includes(dropdown.getValue())) {
+		dropdown.setValue(templates[0]);
+	}
+	return templates;
+}
+
 export function renderTypstSettings(
 	containerEl: HTMLElement,
 	plugin: BonWorkflow,
@@ -236,7 +494,10 @@ export function renderTypstSettings(
 	const resolver = converter?.getPathResolver();
 
 	// 验证格式兼容性：WASM 模式下只能使用 SVG
-	if (typstSettings.previewMode === "wasm" && typstSettings.compileFormat !== "svg") {
+	if (
+		typstSettings.previewMode === "wasm" &&
+		typstSettings.compileFormat !== "svg"
+	) {
 		typstSettings.compileFormat = "svg";
 		void plugin.saveSettings(); // 静默保存
 		console.log(
@@ -317,6 +578,20 @@ export function renderTypstSettings(
 		);
 
 	new Setting(section)
+		.setName("Show notice on auto compile")
+		.setDesc(
+			"Display success notification with action buttons when auto-compile completes. If disabled, auto-compile runs silently (recommended to avoid frequent interruptions)."
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(typstSettings.showNoticeOnAutoCompile)
+				.onChange(async (value) => {
+					typstSettings.showNoticeOnAutoCompile = value;
+					await plugin.saveSettings();
+				})
+		);
+
+	new Setting(section)
 		.setName("Transform engine")
 		.setDesc(
 			"Choose built-in AST transform or continue using custom scripts"
@@ -353,8 +628,8 @@ export function renderTypstSettings(
 		.setName("Enhanced checkbox support")
 		.setDesc(
 			"Enable 24+ checkbox styles with @preview/cheq package.\n" +
-			"⚠️ When enabled: Requires CLI compilation (slower, full features).\n" +
-			"When disabled: Uses basic GFM checkboxes (WASM compatible, faster)."
+				"⚠️ When enabled: Requires CLI compilation (slower, full features).\n" +
+				"When disabled: Uses basic GFM checkboxes (WASM compatible, faster)."
 		)
 		.addToggle((toggle) =>
 			toggle
@@ -407,7 +682,7 @@ export function renderTypstSettings(
 
 			const cliInfo = await detectTypstCLI(
 				resolver,
-				typstSettings.typstCliPath,
+				typstSettings.typstCliPath
 			);
 
 			if (cliInfo.installed) {
@@ -419,7 +694,9 @@ export function renderTypstSettings(
 					}[cliInfo.method || "unknown"] || "Unknown";
 
 				cliStatusSetting.setDesc(
-					`✅ ${methodLabel}: ${cliInfo.path}\n📦 Version: ${cliInfo.version || "unknown"}`,
+					`✅ ${methodLabel}: ${cliInfo.path}\n📦 Version: ${
+						cliInfo.version || "unknown"
+					}`
 				);
 			} else {
 				// Platform-specific error messages
@@ -463,7 +740,7 @@ export function renderTypstSettings(
 			.setName("Custom Typst CLI path (optional)")
 			.setDesc(
 				"Override auto-detection by specifying full path to typst executable.\n" +
-					getPathExamples(),
+					getPathExamples()
 			)
 			.addText((text) => {
 				text.setPlaceholder("Leave empty for auto-detection")
@@ -497,11 +774,13 @@ export function renderTypstSettings(
 						const result = await detectTypstCLI(resolver, testPath);
 						if (result.installed) {
 							new Notice(
-								`✅ Valid Typst CLI\nPath: ${result.path}\nVersion: ${result.version}`,
+								`✅ Valid Typst CLI\nPath: ${result.path}\nVersion: ${result.version}`
 							);
 						} else {
 							new Notice(
-								`❌ Invalid path: ${testPath}\n${result.error || "Command not found"}`,
+								`❌ Invalid path: ${testPath}\n${
+									result.error || "Command not found"
+								}`
 							);
 						}
 					});
@@ -514,7 +793,7 @@ export function renderTypstSettings(
 			.setDesc(
 				"📱 CLI compilation is only available on desktop.\n" +
 					"💡 On mobile, use WASM preview mode for real-time rendering.\n" +
-					"ℹ️ WASM mode doesn't support external packages but works offline.",
+					"ℹ️ WASM mode doesn't support external packages but works offline."
 			);
 	}
 
@@ -535,7 +814,10 @@ export function renderTypstSettings(
 					typstSettings.previewMode = value as TypstPreviewMode;
 
 					// WASM 模式下自动切换到 SVG 格式
-					if (value === "wasm" && typstSettings.compileFormat !== "svg") {
+					if (
+						value === "wasm" &&
+						typstSettings.compileFormat !== "svg"
+					) {
 						typstSettings.compileFormat = "svg";
 						new Notice(
 							`Preview mode set to: ${value}\nCompile format auto-switched to SVG (WASM only supports SVG)`
@@ -605,6 +887,105 @@ export function renderTypstSettings(
 					await plugin.saveSettings();
 				});
 		});
+
+	// === 文件路径配置 ===
+	new Setting(section).setHeading().setName("File path configuration");
+
+	// .typ 文件存储模式
+	new Setting(section)
+		.setName("Intermediate .typ file storage")
+		.setDesc("Choose where to store intermediate .typ files")
+		.addDropdown((dropdown) => {
+			dropdown.addOption(
+				"same-dir",
+				"Same directory as source (default)"
+			);
+			dropdown.addOption("unified", "Unified directory (.typst-temp)");
+			dropdown.addOption("custom", "Custom directory");
+			dropdown
+				.setValue(typstSettings.typFileStorageMode || "same-dir")
+				.onChange(async (value) => {
+					typstSettings.typFileStorageMode = value as any;
+					await plugin.saveSettings();
+					settingTab.display(); // 刷新UI显示自定义目录输入框
+				});
+		});
+
+	// 自定义 .typ 目录（仅在 unified/custom 模式显示）
+	if (typstSettings.typFileStorageMode !== "same-dir") {
+		new Setting(section)
+			.setName(".typ file directory")
+			.setDesc("Vault-relative path for storing .typ files")
+			.addText((text) => {
+				text.setPlaceholder(".typst-temp")
+					.setValue(typstSettings.typFileDirectory || ".typst-temp")
+					.onChange(async (value) => {
+						typstSettings.typFileDirectory =
+							value.trim() || ".typst-temp";
+						await plugin.saveSettings();
+					});
+			});
+	}
+
+	// 输出文件目录
+	new Setting(section)
+		.setName("Output file directory (optional)")
+		.setDesc("Leave empty to output in the same directory as source file")
+		.addText((text) => {
+			text.setPlaceholder("exports/typst")
+				.setValue(typstSettings.outputDirectory || "")
+				.onChange(async (value) => {
+					typstSettings.outputDirectory = value.trim() || undefined;
+					await plugin.saveSettings();
+				});
+		});
+
+	// 输出文件命名优先级
+	new Setting(section)
+		.setName("Output filename source priority")
+		.setDesc(
+			"Priority order for determining output filename:\n" +
+				"1. Frontmatter (typst-output-name)\n" +
+				"2. Folder name\n" +
+				"3. File name (default)"
+		)
+		.addDropdown((dropdown) => {
+			dropdown.addOption(
+				"frontmatter,folder,filename",
+				"Frontmatter > Folder > Filename"
+			);
+			dropdown.addOption(
+				"frontmatter,filename,folder",
+				"Frontmatter > Filename > Folder"
+			);
+			dropdown.addOption(
+				"folder,filename,frontmatter",
+				"Folder > Filename > Frontmatter"
+			);
+			dropdown.addOption(
+				"filename,folder,frontmatter",
+				"Filename > Folder > Frontmatter"
+			);
+
+			const current = typstSettings.outputNamingPriority.join(",");
+			dropdown.setValue(current).onChange(async (value) => {
+				typstSettings.outputNamingPriority = value.split(",") as any;
+				await plugin.saveSettings();
+			});
+		});
+
+	// 时间戳选项
+	new Setting(section)
+		.setName("Append timestamp to output filename")
+		.setDesc("Add timestamp (YYYYMMDD-HHmmss) to avoid filename conflicts")
+		.addToggle((toggle) =>
+			toggle
+				.setValue(typstSettings.outputAppendTimestamp || false)
+				.onChange(async (value) => {
+					typstSettings.outputAppendTimestamp = value;
+					await plugin.saveSettings();
+				})
+		);
 
 	let pendingDirectory = typstSettings.scriptDirectory;
 	new Setting(section)
@@ -819,6 +1200,279 @@ export function renderTypstSettings(
 				}
 			})
 	);
+
+	// ===== Template Management =====
+	// Reuse the converter variable defined at the top of renderTypstSettings
+	const templateManager = converter?.getTemplateManager();
+
+	new Setting(section).setHeading().setName("Template management");
+
+	// Enable template system toggle
+	new Setting(section)
+		.setName("Enable template system")
+		.setDesc(
+			"Apply Typst templates before content. Templates are .typ files that define document formatting."
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(typstSettings.enableTemplateSystem ?? true)
+				.onChange(async (value) => {
+					typstSettings.enableTemplateSystem = value;
+					await plugin.saveSettings();
+					settingTab.display(); // Refresh to show/hide template options
+				})
+		);
+
+	if (!typstSettings.enableTemplateSystem) {
+		new Setting(section)
+			.setName("Template system disabled")
+			.setDesc("Enable template system above to manage templates");
+		return; // Don't show template management when disabled
+	}
+
+	// Template directory configuration
+	let pendingTemplateDirectory =
+		typstSettings.templateDirectory || "typst-templates";
+	new Setting(section)
+		.setName("Template directory")
+		.setDesc("Vault-relative path for storing Typst templates")
+		.addText((text) => {
+			text.setPlaceholder("typst-templates")
+				.setValue(typstSettings.templateDirectory || "typst-templates")
+				.onChange((value) => {
+					pendingTemplateDirectory =
+						value.trim() || "typst-templates";
+				});
+			text.inputEl.addEventListener("blur", async () => {
+				if (
+					pendingTemplateDirectory === typstSettings.templateDirectory
+				) {
+					return;
+				}
+				typstSettings.templateDirectory = pendingTemplateDirectory;
+				await plugin.saveSettings();
+				await plugin.refreshTypstFeatures();
+				new Notice("Typst template directory updated");
+			});
+			text.inputEl.addEventListener("keydown", (event) => {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					text.inputEl.blur();
+				}
+			});
+		});
+
+	// Default template selector
+	new Setting(section)
+		.setName("Default template")
+		.setDesc(
+			'Template used when no folder mapping or frontmatter specified. "default" is a read-only template.'
+		)
+		.addDropdown(async (dropdown) => {
+			dropdown.setDisabled(!templateManager);
+			if (templateManager) {
+				const templates = await templateManager.listTemplates();
+				templates.forEach((name) => {
+					dropdown.addOption(
+						name,
+						name === "default" ? `${name} (built-in)` : name
+					);
+				});
+				dropdown
+					.setValue(typstSettings.defaultTemplateName || "default")
+					.onChange(async (value) => {
+						typstSettings.defaultTemplateName = value;
+						await plugin.saveSettings();
+						new Notice(`Default template set to: ${value}`);
+					});
+			}
+		});
+
+	// Template list management
+	const templateSetting = new Setting(section)
+		.setName("Template list")
+		.setDesc("Manage Typst templates (.typ files)");
+
+	let templateDropdown: DropdownComponent | null = null;
+	templateSetting.addDropdown((drop) => {
+		templateDropdown = drop;
+		drop.setDisabled(!templateManager);
+	});
+
+	let cachedTemplates: string[] = [];
+	if (templateManager && templateDropdown) {
+		void (async () => {
+			cachedTemplates = await refreshTemplateOptions(
+				templateDropdown!,
+				templateManager
+			);
+		})();
+	} else {
+		templateSetting.setDesc("Template manager is not initialized");
+	}
+
+	// Create button
+	templateSetting.addButton((button) =>
+		button
+			.setButtonText("Create")
+			.setCta()
+			.setDisabled(!templateManager)
+			.onClick(() => {
+				if (!templateManager || !templateDropdown) {
+					return;
+				}
+				new ScriptEditorModal(plugin.app, {
+					mode: "create",
+					contentType: "template",
+					initialContent:
+						'// Your Typst template\n\n#set page(paper: "a4")\n#set text(size: 11pt)\n\n',
+					onSubmit: async (name, content) => {
+						await templateManager.saveTemplate(name, content);
+						new Notice(`Template ${name} created`);
+						cachedTemplates = await refreshTemplateOptions(
+							templateDropdown!,
+							templateManager
+						);
+						settingTab.display();
+					},
+				}).open();
+			})
+	);
+
+	// Copy button
+	templateSetting.addButton((button) =>
+		button
+			.setButtonText("Copy")
+			.setDisabled(!templateManager)
+			.onClick(async () => {
+				if (!templateManager || !templateDropdown) {
+					return;
+				}
+				const templateName = templateDropdown.getValue();
+				if (!templateName) {
+					new Notice("Please select a template to copy");
+					return;
+				}
+
+				new ScriptNameModal(plugin.app, {
+					title: `Copy template "${templateName}"`,
+					placeholder: "Enter new template name",
+					submitText: "Copy",
+					onSubmit: async (newName) => {
+						try {
+							await templateManager.copyTemplate(
+								templateName,
+								newName
+							);
+							new Notice(`Template copied to: ${newName}`);
+							cachedTemplates = await refreshTemplateOptions(
+								templateDropdown!,
+								templateManager
+							);
+							templateDropdown.setValue(newName);
+							settingTab.display();
+						} catch (error) {
+							const message =
+								error instanceof Error
+									? error.message
+									: String(error);
+							new Notice(`Copy failed: ${message}`);
+						}
+					},
+				}).open();
+			})
+	);
+
+	// Edit button
+	templateSetting.addButton((button) =>
+		button
+			.setButtonText("Edit")
+			.setDisabled(!templateManager)
+			.onClick(async () => {
+				if (!templateManager || !templateDropdown) {
+					return;
+				}
+				const templateName = templateDropdown.getValue();
+				if (!templateName) {
+					new Notice("Please select a template to edit");
+					return;
+				}
+
+				if (templateName === "default") {
+					new Notice(
+						'The "default" template is read-only. Use Copy to create an editable version.'
+					);
+					return;
+				}
+
+				const content = await templateManager.loadTemplate(
+					templateName
+				);
+				new ScriptEditorModal(plugin.app, {
+					mode: "edit",
+					contentType: "template",
+					scriptName: templateName,
+					initialContent: content,
+					onSubmit: async (_name, updated) => {
+						await templateManager.saveTemplate(
+							templateName,
+							updated
+						);
+						new Notice(`Template ${templateName} updated`);
+					},
+				}).open();
+			})
+	);
+
+	// Delete button
+	templateSetting.addButton((button) =>
+		button
+			.setButtonText("Delete")
+			.setDisabled(!templateManager)
+			.onClick(async () => {
+				if (!templateManager || !templateDropdown) {
+					return;
+				}
+				const templateName = templateDropdown.getValue();
+				if (!templateName) {
+					new Notice("Please select a template to delete");
+					return;
+				}
+				try {
+					await templateManager.deleteTemplate(
+						templateName,
+						typstSettings.defaultTemplateName
+					);
+					new Notice(`Template ${templateName} deleted`);
+					cachedTemplates = await refreshTemplateOptions(
+						templateDropdown!,
+						templateManager
+					);
+					if (cachedTemplates.length === 0) {
+						templateDropdown.setValue("");
+					}
+					settingTab.display();
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : String(error);
+					new Notice(message);
+				}
+			})
+	);
+
+	// ===== Conversion Preview =====
+	new Setting(section)
+		.setName("Preview conversion")
+		.setDesc(
+			"Test how your template and script transform Markdown to Typst"
+		)
+		.addButton((btn) => {
+			btn.setButtonText("Open Preview")
+				.setCta()
+				.onClick(() => {
+					new ConversionPreviewModal(plugin.app, plugin).open();
+				});
+		});
 }
 
 /**

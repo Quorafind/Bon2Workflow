@@ -362,3 +362,52 @@ table.subscription-tracker-table {
 	background: var(--background-primary);
 	border-radius: 4px;
 }
+
+/* Typst Settings Tab Modal Styles */
+
+/* Conversion Preview Modal - Markdown Input Textarea */
+.conversion-preview-markdown-textarea {
+	font-family: var(--font-monospace) !important;
+	font-size: 13px !important;
+	width: 100% !important;
+}
+
+/* Conversion Preview Modal - Output Textarea */
+.conversion-preview-output-textarea {
+	font-family: var(--font-monospace) !important;
+	font-size: 12px !important;
+	width: 100% !important;
+	background-color: var(--background-secondary) !important;
+}
+
+/* Script/Template Editor Modal - Textarea */
+.script-editor-modal-textarea {
+	font-family: var(--font-monospace) !important;
+	font-size: 13px !important;
+	width: 100% !important;
+}
+
+/* Typst Notice 增强样式 */
+.typst-notice-text {
+	font-weight: 500;
+}
+
+.typst-notice-path {
+	/* background: var(--background-modifier-border); */
+	padding: 2px 6px;
+	border-radius: 3px;
+	font-size: 0.9em;
+}
+
+.typst-notice-buttons {
+	display: flex;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+.typst-notice-buttons button {
+	flex: 1;
+	padding: 4px 12px;
+	font-size: 0.9em;
+	cursor: pointer;
+}

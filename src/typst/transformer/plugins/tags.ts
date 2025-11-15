@@ -4,7 +4,12 @@ import type { Root, Text } from "mdast";
 import type { ObsidianTagNode } from "../types";
 import { replaceInTextNode } from "./utils";
 
-const TAG_PATTERN = /(?<!\S)#([A-Za-z0-9_\-/]+)/g;
+// Match Obsidian tags, but exclude Typst function/variable calls
+// Negative lookahead (?![.([]) ensures we don't match:
+// - #func() - Typst function call
+// - #var.prop - Typst property access
+// - #arr[idx] - Typst array/dict access
+const TAG_PATTERN = /(?<!\S)#([A-Za-z0-9_\-/]+)(?![.([[])/g;
 
 const EXCLUDED_PARENTS = new Set(["heading", "inlineCode", "code"]);
 

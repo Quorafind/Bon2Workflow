@@ -1,5 +1,6 @@
 import {
 	type Menu,
+	Modal,
 	Notice,
 	Plugin,
 	type TAbstractFile,
@@ -470,8 +471,10 @@ export default class BonWorkflow extends Plugin {
 					const previewMode =
 						this.settings.typst.previewMode ?? "wasm";
 					if (shouldConvert && previewMode !== "none") {
+						// 根据设置决定是否显示通知（默认静默，避免频繁打扰）
+						const silent = !this.settings.typst.showNoticeOnAutoCompile;
 						await this.typstConverter.convertFile(file, cache, {
-							silent: true,
+							silent,
 						});
 					}
 				} catch (error) {
@@ -603,6 +606,53 @@ export default class BonWorkflow extends Plugin {
 	}
 
 	/**
+	 * 显示确认对话框
+	 */
+	private async showConfirmDialog(title: string, message: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			const modal = new Modal(this.app);
+			modal.titleEl.setText(title);
+			modal.contentEl.createEl("p", { text: message });
+
+			const buttonContainer = modal.contentEl.createDiv({ cls: "modal-button-container" });
+
+			buttonContainer.createEl("button", { text: "Cancel" })
+				.addEventListener("click", () => {
+					modal.close();
+					resolve(false);
+				});
+
+			buttonContainer.createEl("button", { text: "Confirm", cls: "mod-warning" })
+				.addEventListener("click", () => {
+					modal.close();
+					resolve(true);
+				});
+
+			modal.open();
+		});
+	}
+
+	/**
+	 * 清理所有 .typ 文件
+	 */
+	private async cleanTypstFiles(): Promise<number> {
+		const files = this.app.vault.getFiles();
+		const typFiles = files.filter((f) => f.extension === "typ");
+
+		let count = 0;
+		for (const file of typFiles) {
+			try {
+				await this.app.vault.delete(file);
+				count++;
+			} catch (error) {
+				console.error(`Failed to delete ${file.path}:`, error);
+			}
+		}
+
+		return count;
+	}
+
+	/**
 	 * Register Typst-related commands (only called when Typst features are enabled)
 	 */
 	private registerTypstCommands(): void {
@@ -667,6 +717,36 @@ export default class BonWorkflow extends Plugin {
 				}
 				this.activateTypstPreviewView();
 				return true;
+			},
+		});
+
+		// 清理中间 .typ 文件命令
+		this.addCommand({
+			id: "clean-typst-intermediate-files",
+			name: "Clean intermediate .typ files",
+			callback: async () => {
+				if (!this.typstConverter) {
+					new Notice("Typst converter not initialized");
+					return;
+				}
+
+				// 确认对话框
+				const confirmed = await this.showConfirmDialog(
+					"Clean .typ files",
+					"This will delete all intermediate .typ files. Continue?"
+				);
+
+				if (!confirmed) {
+					return;
+				}
+
+				try {
+					const count = await this.cleanTypstFiles();
+					new Notice(`Cleaned ${count} .typ file(s)`);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					new Notice(`Failed to clean: ${message}`);
+				}
 			},
 		});
 	}

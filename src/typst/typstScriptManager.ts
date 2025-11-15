@@ -1,4 +1,5 @@
-import { normalizePath, Vault } from "obsidian";
+import { Vault } from "obsidian";
+import { BaseContentManager } from "./typstBaseContentManager";
 
 const DEFAULT_SCRIPT_NAME = "default";
 const DEFAULT_SCRIPT_FILENAME = `${DEFAULT_SCRIPT_NAME}.js`;
@@ -39,23 +40,31 @@ async function transform(content) {
 }
 `;
 
-export class TypstScriptManager {
-	private scriptCache = new Map<string, string>();
-	private readonly scriptDirectory: string;
+/**
+ * Manages Typst transformation scripts (.js files)
+ * Extends BaseContentManager to inherit common file management operations
+ */
+export class TypstScriptManager extends BaseContentManager<string> {
+	protected readonly fileExtension = ".js";
+	protected readonly defaultContentName = DEFAULT_SCRIPT_NAME;
 
-	constructor(private vault: Vault, scriptDir: string) {
-		this.scriptDirectory = normalizePath(scriptDir || "typst-scripts");
+	constructor(vault: Vault, scriptDir: string) {
+		super(vault, scriptDir || "typst-scripts");
 	}
+
+	protected getDefaultContent(): string {
+		return DEFAULT_SCRIPT_CONTENT;
+	}
+
+	// ===== Backward Compatibility Aliases =====
+	// These methods provide backward compatibility with existing code
 
 	/**
 	 * Ensure the script directory exists in the vault.
+	 * @deprecated Use ensureDirectory() from base class
 	 */
 	async ensureScriptDirectory(): Promise<void> {
-		const adapter = this.vault.adapter;
-		const exists = await adapter.exists(this.scriptDirectory);
-		if (!exists) {
-			await adapter.mkdir(this.scriptDirectory);
-		}
+		return this.ensureDirectory();
 	}
 
 	/**
@@ -63,73 +72,35 @@ export class TypstScriptManager {
 	 * The "default" script is a read-only template and should not be edited by users.
 	 */
 	async initializeDefaultScript(): Promise<void> {
-		await this.ensureScriptDirectory();
-		const defaultPath = this.getScriptPath(DEFAULT_SCRIPT_NAME);
-		const adapter = this.vault.adapter;
-
-		// Always overwrite default.js with the latest template
-		await adapter.write(defaultPath, DEFAULT_SCRIPT_CONTENT);
-		this.scriptCache.set(DEFAULT_SCRIPT_NAME, DEFAULT_SCRIPT_CONTENT);
+		return this.initializeDefaultContent();
 	}
 
 	/**
 	 * Get the content of the default script.
 	 */
 	async getDefaultScript(): Promise<string> {
-		await this.initializeDefaultScript();
-		return DEFAULT_SCRIPT_CONTENT;
+		return this.getDefault();
 	}
 
 	/**
 	 * List available script names (without file extension).
 	 */
 	async listScripts(): Promise<string[]> {
-		await this.ensureScriptDirectory();
-		const listing = await this.vault.adapter.list(this.scriptDirectory);
-		return listing.files
-			.filter((file) => file.endsWith(".js"))
-			.map((file) => file.split(/[/\\]/).pop() ?? file)
-			.map((file) => file.replace(/\.js$/, ""));
+		return this.listContents();
 	}
 
 	/**
 	 * Load script content by script name. Returns default script if not found.
 	 */
 	async loadScript(scriptName: string): Promise<string> {
-		const normalized =
-			this.normalizeScriptName(scriptName) || DEFAULT_SCRIPT_NAME;
-		if (this.scriptCache.has(normalized)) {
-			return this.scriptCache.get(normalized) as string;
-		}
-
-		const path = this.getScriptPath(normalized);
-		const adapter = this.vault.adapter;
-
-		if (!(await adapter.exists(path))) {
-			if (normalized === DEFAULT_SCRIPT_NAME) {
-				await this.initializeDefaultScript();
-				return DEFAULT_SCRIPT_CONTENT;
-			}
-			return this.loadScript(DEFAULT_SCRIPT_NAME);
-		}
-
-		const content = await adapter.read(path);
-		this.scriptCache.set(normalized, content);
-		return content;
+		return this.loadContent(scriptName);
 	}
 
 	/**
 	 * Save or update the script with provided content.
 	 */
 	async saveScript(scriptName: string, content: string): Promise<void> {
-		const normalized = this.normalizeScriptName(scriptName);
-		this.validateScriptName(normalized);
-
-		await this.ensureScriptDirectory();
-
-		const path = this.getScriptPath(normalized);
-		await this.vault.adapter.write(path, content);
-		this.scriptCache.set(normalized, content);
+		return this.saveContent(scriptName, content);
 	}
 
 	/**
@@ -138,25 +109,7 @@ export class TypstScriptManager {
 	 * @param protectedScriptName Optional protected script name (cannot be deleted)
 	 */
 	async deleteScript(scriptName: string, protectedScriptName?: string): Promise<void> {
-		const normalized = this.normalizeScriptName(scriptName);
-		this.validateScriptName(normalized);
-
-		// Cannot delete the default template script
-		if (normalized === DEFAULT_SCRIPT_NAME) {
-			throw new Error('The "default" template script cannot be deleted');
-		}
-
-		// Cannot delete the user's default script
-		if (protectedScriptName && normalized === this.normalizeScriptName(protectedScriptName)) {
-			throw new Error(`Cannot delete "${normalized}" as it is set as the default script`);
-		}
-
-		const path = this.getScriptPath(normalized);
-		const adapter = this.vault.adapter;
-		if (await adapter.exists(path)) {
-			await adapter.remove(path);
-		}
-		this.scriptCache.delete(normalized);
+		return this.deleteContent(scriptName, protectedScriptName);
 	}
 
 	/**
@@ -165,54 +118,9 @@ export class TypstScriptManager {
 	 * @param targetScriptName Target script name
 	 */
 	async copyScript(sourceScriptName: string, targetScriptName: string): Promise<void> {
-		const normalizedSource = this.normalizeScriptName(sourceScriptName);
-		const normalizedTarget = this.normalizeScriptName(targetScriptName);
-
-		this.validateScriptName(normalizedTarget);
-
-		if (normalizedTarget === DEFAULT_SCRIPT_NAME) {
-			throw new Error('Cannot overwrite the "default" template script');
-		}
-
-		// Check if target already exists
-		const targetPath = this.getScriptPath(normalizedTarget);
-		if (await this.vault.adapter.exists(targetPath)) {
-			throw new Error(`Script "${normalizedTarget}" already exists`);
-		}
-
-		// Load source content
-		const sourceContent = await this.loadScript(normalizedSource);
-
-		// Save to target
-		await this.saveScript(normalizedTarget, sourceContent);
-	}
-
-	/**
-	 * Get full script file path in the vault.
-	 */
-	private getScriptPath(scriptName: string): string {
-		return normalizePath(`${this.scriptDirectory}/${scriptName}.js`);
-	}
-
-	/**
-	 * Normalize script name (no extension, trimmed).
-	 */
-	private normalizeScriptName(scriptName: string): string {
-		return scriptName.trim().replace(/\.js$/, "");
-	}
-
-	/**
-	 * Validate script name (required, no path separator).
-	 */
-	private validateScriptName(scriptName: string): void {
-		if (!scriptName) {
-			throw new Error("Script name cannot be empty");
-		}
-
-		if (/[\/\\]/.test(scriptName)) {
-			throw new Error("Script name cannot contain path separators");
-		}
+		return this.copyContent(sourceScriptName, targetScriptName);
 	}
 }
 
 export { DEFAULT_SCRIPT_CONTENT, DEFAULT_SCRIPT_NAME, DEFAULT_SCRIPT_FILENAME };
+
